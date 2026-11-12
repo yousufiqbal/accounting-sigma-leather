@@ -34,6 +34,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		batch: b.batch,
 		costs: b.costs,
 		totals: b.totals,
+		shipment: b.shipment,
 		lines: b.lines
 			.map((l) => ({ ...l, variant: byId.get(l.variantId) ?? null }))
 			.sort((a, c) =>
@@ -87,14 +88,12 @@ export const actions: Actions = {
 		const f = await request.formData();
 		const ref = String(f.get('ref') ?? '').trim();
 		if (!ref) return fail(400, { error: 'Name is required.' });
-		let fx = batch.fxRateX10000,
-			ddp: number;
+		let fx = batch.fxRateX10000;
 		try {
 			if (batch.currency !== 'PKR') {
 				fx = Math.round(Number(String(f.get('fx')).replace(/,/g, '')) * 10_000);
 				if (!Number.isFinite(fx) || fx <= 0) throw new Error();
 			}
-			ddp = Math.abs(toPaisa(String(f.get('ddp') ?? '0')));
 		} catch {
 			return fail(400, { error: 'Rates must be numbers.' });
 		}
@@ -104,11 +103,40 @@ export const actions: Actions = {
 				ref,
 				supplier: String(f.get('supplier') ?? '').trim() || null,
 				notes: String(f.get('notes') ?? '').trim() || null,
-				fxRateX10000: fx,
-				ddpRatePerKg: ddp
+				fxRateX10000: fx
 			})
 			.where(eq(schema.importBatches.id, params.id));
 		return { saved: 'Saved.' };
+	},
+
+	/** Shipment DDP: billed box weight (kg) × rate, or the invoice total. */
+	shipment: async ({ params, request }) => {
+		if (!(await editable(params.id))) return fail(400, LANDED);
+		const f = await request.formData();
+		const num = (k: string) => {
+			const s = String(f.get(k) ?? '').trim().replace(/,/g, '');
+			if (s === '') return null;
+			const n = Number(s);
+			if (!Number.isFinite(n) || n < 0) throw new Error(k);
+			return n;
+		};
+		let kg: number | null, rate: number | null, total: number | null;
+		try {
+			kg = num('billedKg');
+			rate = num('ddp');
+			total = num('ddpTotal');
+		} catch {
+			return fail(400, { error: 'Weight, rate and total must be numbers.' });
+		}
+		await db
+			.update(schema.importBatches)
+			.set({
+				billedWeightG: kg === null ? null : Math.round(kg * 1000),
+				ddpRatePerKg: Math.round((rate ?? 0) * 100),
+				ddpTotal: total === null ? null : Math.round(total * 100)
+			})
+			.where(eq(schema.importBatches.id, params.id));
+		return { saved: kg === null && total === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.' };
 	},
 
 	add: async ({ params, request }) => {

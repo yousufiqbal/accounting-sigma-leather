@@ -66,6 +66,7 @@
 							</Table.Cell>
 							<Table.Cell>
 								<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
+								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge tone="warning" label="DDP pending" />{/if}
 								<div class="text-xs text-muted-foreground">
 									{b.status === 'landed' ? fmtDate(b.landedOn) : b.status === 'paid' ? fmtDate(b.paidOn) : ''}
 								</div>

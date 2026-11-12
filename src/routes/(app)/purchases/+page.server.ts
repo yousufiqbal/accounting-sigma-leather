@@ -14,7 +14,7 @@ export const load: PageServerLoad = async () => {
 	const batches = (await Promise.all(list.map((b) => loadBatch(b.id)))).filter((b) => b !== null);
 	return {
 		rates: await getRates(),
-		batches: batches.map((b) => ({ ...b.batch, totals: b.totals, items: b.items.length }))
+		batches: batches.map((b) => ({ ...b.batch, totals: b.totals, items: b.items.length, ddpPending: b.shipment.ddpPending }))
 	};
 };
 

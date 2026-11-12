@@ -97,6 +97,10 @@ export const importBatches = sqliteTable('import_batches', {
 		.default('RMB'),
 	fxRateX10000: integer('fx_rate_x10000').notNull().default(0), // PKR per 1 unit × 10^4
 	ddpRatePerKg: money('ddp_rate_per_kg_paisa'),
+	/** Actual box weight the forwarder billed (grams). null = DDP pending. */
+	billedWeightG: integer('billed_weight_g'),
+	/** Invoice DDP total if it differs from weight × rate (paisa). */
+	ddpTotal: integer('ddp_total_paisa'),
 	status: text('status', { enum: ['draft', 'paid', 'landing', 'landed'] })
 		.notNull()
 		.default('draft'),

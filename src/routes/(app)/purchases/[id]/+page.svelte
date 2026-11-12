@@ -80,6 +80,7 @@
 			<h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
 				{b.ref}
 				<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
+				{#if data.shipment.ddpPending && !locked}<StatusBadge tone="warning" label="DDP pending" />{/if}
 			</h1>
 			<p class="text-sm text-muted-foreground">
 				{b.supplier ?? 'No supplier'} ·
@@ -142,18 +143,73 @@
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-5">
 		<Stat label="Units">{data.totals.units.toLocaleString('en-PK')}</Stat>
-		<Stat label="Weight">{(data.totals.weightG / 1000).toFixed(1)} kg</Stat>
+		<Stat label="Item weight" hint={data.shipment.billedWeightG !== null ? `Billed ${(data.shipment.billedWeightG / 1000).toFixed(1)} kg` : 'Box weight not entered'}>
+			{(data.totals.weightG / 1000).toFixed(1)} kg
+		</Stat>
 		<Stat label="Goods">{formatRs(data.totals.goods)}</Stat>
 		<Stat label="DDP + other costs">{formatRs(data.totals.ddp + data.totals.extra)}</Stat>
 		<Stat label="Landed total">{formatRs(data.totals.landed)}</Stat>
 	</div>
+
+	<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
+		<Card.Header>
+			<Card.Title>Shipment DDP</Card.Title>
+			<Card.Description>
+				Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split across
+				items by their weight (unit weight × qty), so cartons and packing are shared fairly. Other
+				costs below are split the same way.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="grid gap-4">
+			<form method="POST" action={formAction('shipment')} use:enhance={act('shipment')} class="flex flex-wrap items-end gap-3">
+				<fieldset disabled={locked} class="contents">
+					<div class="grid gap-1.5">
+						<Label for="billedKg">Billed box weight (kg)</Label>
+						<Input id="billedKg" name="billedKg" inputmode="decimal" class="w-36" value={data.shipment.billedWeightG !== null ? data.shipment.billedWeightG / 1000 : ''} placeholder="e.g. 48.5" />
+					</div>
+					<div class="grid gap-1.5">
+						<Label for="ddp">DDP Rs per kg</Label>
+						<Input id="ddp" name="ddp" inputmode="decimal" class="w-32" value={b.ddpRatePerKg / 100} />
+					</div>
+					<div class="grid gap-1.5">
+						<Label for="ddpTotal">Invoice total Rs <span class="font-normal text-muted-foreground">(optional)</span></Label>
+						<Input id="ddpTotal" name="ddpTotal" inputmode="decimal" class="w-36" value={b.ddpTotal !== null ? b.ddpTotal / 100 : ''} placeholder={data.shipment.billedWeightG !== null ? String(Math.round((data.shipment.billedWeightG * b.ddpRatePerKg) / 100000)) : 'weight × rate'} />
+					</div>
+					{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>{busy === 'shipment' ? 'Saving…' : 'Save'}</Button>{/if}
+				</fieldset>
+			</form>
+			<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
+				<div>
+					<span class="text-muted-foreground">DDP to split</span>
+					<div class="num font-medium">
+						{#if data.shipment.ddpTotal !== null}{formatRs(data.shipment.ddpTotal)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning">pending — showing estimate {formatRs(data.totals.ddp)}</span>{/if}
+					</div>
+				</div>
+				{#if data.shipment.overhead !== null}
+					<div>
+						<span class="text-muted-foreground">Packing overhead</span>
+						<div class={['num font-medium', data.shipment.overhead < 0 ? 'text-danger' : '']}>
+							{data.shipment.overhead >= 0 ? '+' : ''}{(data.shipment.overhead * 100).toFixed(0)}%
+							<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span>
+						</div>
+					</div>
+				{/if}
+				{#if data.shipment.itemsWithoutWeight}
+					<div class="text-danger">{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.</div>
+				{/if}
+				{#if data.shipment.overhead !== null && data.shipment.overhead < 0}
+					<div class="text-danger">Billed weight is less than the items' weights — check the item weights.</div>
+				{/if}
+			</div>
+		</Card.Content>
+	</Card.Root>
 
 	<Card.Root>
 		<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
 			<div>
 				<Card.Title>Items</Card.Title>
 				<Card.Description>
-					Landed per piece = price{isRmb ? ' × rate' : ''} + weight × DDP + share of other costs (by value).
+					Landed per piece = price{isRmb ? ' × rate' : ''} + DDP share + other-costs share (both by weight).
 				</Card.Description>
 			</div>
 			{#if !locked}
@@ -275,7 +331,7 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>Other costs</Card.Title>
-				<Card.Description>Local cartage, customs extras… shared across items by value. DDP is per kg above.</Card.Description>
+				<Card.Description>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-3">
 				{#each data.costs as c (c.id)}
@@ -318,7 +374,6 @@
 						{#if isRmb}
 							<div class="grid gap-1.5"><Label for="fx">Rs per 1 yuan</Label><Input id="fx" name="fx" inputmode="decimal" value={b.fxRateX10000 / 10_000} /></div>
 						{/if}
-						<div class="grid gap-1.5"><Label for="ddp">DDP Rs per kg</Label><Input id="ddp" name="ddp" inputmode="decimal" value={b.ddpRatePerKg / 100} /></div>
 						<div class="grid gap-1.5 sm:col-span-2"><Label for="notes">Notes</Label><Textarea id="notes" name="notes" rows={2} value={b.notes ?? ''} /></div>
 					</fieldset>
 					{#if !locked}

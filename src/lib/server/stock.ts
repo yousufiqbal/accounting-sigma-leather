@@ -57,29 +57,57 @@ type Batch = typeof schema.importBatches.$inferSelect;
 type Item = typeof schema.batchItems.$inferSelect;
 type Cost = typeof schema.batchCosts.$inferSelect;
 
+/**
+ * Landed cost per piece:
+ *   goods  = unit price × FX (PKR: as-is)
+ *   DDP    = shipment DDP (billed box weight × rate/kg, or the invoice total) split by
+ *            item weight share (unit weight × qty); before the box weight is known it is
+ *            estimated as unit weight × rate and the purchase is "DDP pending"
+ *   extra  = other shipment costs, also split by weight (by value if no item has a weight)
+ */
 export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 	const fx = batch.currency === 'PKR' ? 10_000 : batch.fxRateX10000;
-	const lines = items.map((it) => {
+	const itemWeight = items.reduce((t, it) => t + it.unitWeightG * it.qty, 0);
+	const goodsTotal = items.reduce((t, it) => t + goodsCost(it.unitPriceForeignMinor, batch.currency, fx) * it.qty, 0);
+	const billed = batch.billedWeightG ?? null;
+	const ddpTotal =
+		batch.ddpTotal ?? (billed !== null ? Math.round((billed * batch.ddpRatePerKg) / 1000) : null);
+	const ddpPending = ddpTotal === null && batch.ddpRatePerKg > 0;
+	const extraTotal = costs.reduce((t, c) => t + c.amount, 0);
+
+	const out = items.map((it) => {
 		const goods = goodsCost(it.unitPriceForeignMinor, batch.currency, fx);
-		const ddp = ddpCost(it.unitWeightG, batch.ddpRatePerKg);
-		return { ...it, goods, ddp };
-	});
-	const goodsTotal = lines.reduce((s, l) => s + l.goods * l.qty, 0);
-	const extraTotal = costs.reduce((s, c) => s + c.amount, 0);
-	const out = lines.map((l) => {
+		const ddp =
+			ddpTotal === null
+				? ddpCost(it.unitWeightG, batch.ddpRatePerKg) // estimate until the box is weighed
+				: itemWeight > 0
+					? Math.round((ddpTotal * it.unitWeightG) / itemWeight)
+					: 0;
 		const extra =
-			goodsTotal > 0 ? Math.round((extraTotal * l.goods) / goodsTotal) : 0; // per unit, by value
-		return { ...l, extra, landed: l.goods + l.ddp + extra };
+			itemWeight > 0
+				? Math.round((extraTotal * it.unitWeightG) / itemWeight)
+				: goodsTotal > 0
+					? Math.round((extraTotal * goods) / goodsTotal)
+					: 0;
+		return { ...it, goods, ddp, extra, landed: goods + ddp + extra };
 	});
 	return {
 		lines: out,
 		totals: {
-			units: out.reduce((s, l) => s + l.qty, 0),
+			units: out.reduce((t, l) => t + l.qty, 0),
 			goods: goodsTotal,
-			ddp: out.reduce((s, l) => s + l.ddp * l.qty, 0),
+			ddp: out.reduce((t, l) => t + l.ddp * l.qty, 0),
 			extra: extraTotal,
-			landed: out.reduce((s, l) => s + l.landed * l.qty, 0),
-			weightG: out.reduce((s, l) => s + l.unitWeightG * l.qty, 0)
+			landed: out.reduce((t, l) => t + l.landed * l.qty, 0),
+			weightG: itemWeight
+		},
+		shipment: {
+			billedWeightG: billed,
+			ddpTotal,
+			ddpPending,
+			/** Box weight vs item weights: cartons, packing, rounding. */
+			overhead: billed !== null && itemWeight > 0 ? billed / itemWeight - 1 : null,
+			itemsWithoutWeight: out.filter((l) => l.unitWeightG <= 0).length
 		}
 	};
 }
@@ -185,6 +213,9 @@ export async function landBatch(id: string, landedOn: string) {
 	if (!b.lines.length) throw new Error('Add items first.');
 	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000) throw new Error('Enter the exchange rate.');
 	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
+	if (b.shipment.ddpPending) throw new Error('DDP pending — enter the billed box weight first.');
+	if (b.shipment.ddpTotal && b.shipment.itemsWithoutWeight)
+		throw new Error(`${b.shipment.itemsWithoutWeight} items have no weight, so they would get no DDP share. Enter their weights.`);
 
 	const vars = await db
 		.select()
