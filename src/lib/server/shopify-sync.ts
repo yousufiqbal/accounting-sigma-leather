@@ -173,7 +173,7 @@ const ORDER_FIELDS = `
 	totalRefundedSet { shopMoney { amount } }
 	totalOutstandingSet { shopMoney { amount } }
 	shippingLines(first: 5) { nodes { discountedPriceSet { shopMoney { amount } } } }
-	discountApplications(first: 10) { nodes {
+	discountApplications(first: 60) { nodes {
 		index __typename targetType
 		value { ... on PricingPercentageValue { percentage } ... on MoneyV2 { amount } }
 		... on DiscountCodeApplication { code }
