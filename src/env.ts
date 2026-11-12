@@ -31,8 +31,14 @@ export const variables = defineEnvVars({
 		}
 	},
 	SHOPIFY_STORE_DOMAIN: { description: 'e.g. sigma-leather.myshopify.com', schema: optional },
+	SHOPIFY_CLIENT_ID: { description: 'Dev Dashboard app → Settings → Client ID', schema: optional },
+	SHOPIFY_CLIENT_SECRET: {
+		description: 'Dev Dashboard app → Settings → Secret',
+		schema: optional
+	},
 	SHOPIFY_ADMIN_TOKEN: {
-		description: 'Shopify Admin API access token (shpat_…)',
+		description:
+			'Shopify Admin API access token. Alternative: SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET.',
 		schema: optional
 	},
 	POSTEX_TOKEN: { description: 'PostEx merchant API token', schema: optional },

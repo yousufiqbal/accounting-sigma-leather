@@ -23,7 +23,7 @@ export const load: PageServerLoad = async () => {
 			return `${rows[0]?.n ?? 0} tables`;
 		}),
 		check('Shopify', async () => {
-			if (!shopifyConfigured()) throw new Error('Set SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN');
+			if (!shopifyConfigured()) throw new Error('Set SHOPIFY_STORE_DOMAIN, SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET');
 			const d = await shopifyGql<{ shop: { name: string; currencyCode: string } }>(
 				`{ shop { name currencyCode } }`
 			);
