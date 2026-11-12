@@ -142,18 +142,24 @@
 				}}
 				class="flex items-center gap-2"
 			>
-				<Input
-					type="file"
-					name="file"
-					accept=".xlsx,.csv"
-					required
-					class="max-w-60"
-					aria-label="DEX .xlsx or PostEx .csv"
-				/>
-				<Button type="submit" variant="outline" disabled={uploading}>
-					<Upload />
+				<!-- The button is the file picker: choosing a file uploads it straight away. -->
+				<label
+					class={[
+						'inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs hover:bg-muted',
+						uploading && 'pointer-events-none opacity-60'
+					]}
+					title="DEX .xlsx statement or PostEx .csv export"
+				>
+					<Upload class="size-4" />
 					{uploading ? 'Reading…' : 'Import file'}
-				</Button>
+					<input
+						type="file"
+						name="file"
+						accept=".xlsx,.csv"
+						class="sr-only"
+						onchange={(e) => e.currentTarget.files?.length && e.currentTarget.form?.requestSubmit()}
+					/>
+				</label>
 			</form>
 		</div>
 	</div>
