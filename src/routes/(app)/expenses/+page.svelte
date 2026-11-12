@@ -164,11 +164,14 @@
 		<summary class="cursor-pointer text-muted-foreground">Manage categories</summary>
 		<div class="mt-2 flex flex-wrap gap-2">
 			{#each data.categories.filter((c) => !c.archived) as c (c.id)}
+				{#if data.usedCategories.includes(c.id)}
+					<span class="inline-flex items-center rounded-full border bg-card px-3 py-1 text-muted-foreground" title="Has expenses — can't be removed">{c.name}</span>
+				{:else}
 				<form
 					method="POST"
 					action={formAction('removeCategory')}
 					use:enhance={({ cancel }) => {
-						if (!confirm(`Remove category “${c.name}”? If it has expenses it is only hidden — past reports keep them.`)) cancel();
+						if (!confirm(`Remove category “${c.name}”?`)) cancel();
 					}}
 					class="inline-flex items-center gap-1 rounded-full border bg-card py-0.5 pr-0.5 pl-3"
 				>
@@ -176,6 +179,7 @@
 					<span>{c.name}</span>
 					<Button type="submit" size="icon-xs" variant="ghost" aria-label="Remove {c.name}" class="rounded-full"><X /></Button>
 				</form>
+				{/if}
 			{/each}
 		</div>
 		<form method="POST" action={formAction('addCategory')} use:enhance class="mt-3 flex flex-wrap items-end gap-2">

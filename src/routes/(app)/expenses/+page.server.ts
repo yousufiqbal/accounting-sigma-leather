@@ -52,6 +52,11 @@ export const load: PageServerLoad = async ({ parent }) => {
 		.from(exp)
 		.where(inMonth(month))
 		.groupBy(exp.categoryId);
+	/** All-time expense count per category — only empty categories can be removed. */
+	const used = await db
+		.select({ categoryId: exp.categoryId, n: sql<number>`count(*)` })
+		.from(exp)
+		.groupBy(exp.categoryId);
 	const lastUsdRate = await db
 		.select({ fx: exp.fxRateX10000 })
 		.from(exp)
@@ -62,6 +67,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 		categories: cats,
 		expenses: rows,
 		byCat,
+		usedCategories: used.map((u) => u.categoryId),
 		locked: !!(await db.query.monthLocks.findFirst({ where: eq(schema.monthLocks.month, month) })),
 		lastUsdRate: lastUsdRate[0]?.fx ?? null
 	};
@@ -144,17 +150,17 @@ export const actions: Actions = {
 		return { saved: `Category “${name}” added.` };
 	},
 
-	/** No expenses → delete. Has expenses → hide it (past months keep their numbers). */
+	/** Only categories with no expenses can be removed. */
 	removeCategory: async ({ request }) => {
 		const id = String((await request.formData()).get('id') ?? '');
 		const c = await db.query.expenseCategories.findFirst({ where: eq(cat.id, id) });
 		if (!c) return fail(404, { error: 'Category not found.' });
 		const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(exp).where(eq(exp.categoryId, id));
-		if (n === 0) {
-			await db.delete(cat).where(eq(cat.id, id));
-			return { saved: `Category “${c.name}” removed.` };
-		}
-		await db.update(cat).set({ archived: true }).where(eq(cat.id, id));
-		return { saved: `Category “${c.name}” hidden. Its ${n} past expense${n === 1 ? '' : 's'} stay in the reports.` };
+		if (n > 0)
+			return fail(400, {
+				error: `“${c.name}” has ${n} expense${n === 1 ? '' : 's'} — delete or move them to another category first.`
+			});
+		await db.delete(cat).where(eq(cat.id, id));
+		return { saved: `Category “${c.name}” removed.` };
 	}
 };
