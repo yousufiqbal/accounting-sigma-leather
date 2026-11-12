@@ -158,7 +158,7 @@
 					Fulfilled in Shopify but no PostEx/DEX parcel found — e.g. TCS, Leopards, pickup, own
 					rider. Record what happened so revenue is counted.
 				</Card.Description>
-				{#if data.assume && data.assume.prepaid + data.assume.leopards > 0}
+				{#if data.assume && data.assume.prepaid + data.assume.leopards + data.assume.direct > 0}
 					<form
 						method="POST"
 						action="?/assume"
@@ -169,7 +169,7 @@
 							Ready to apply the standard rule to orders fulfilled 14+ days ago:
 							<b>{data.assume.prepaid}</b> prepaid → delivered on fulfilment date (TCS/other) ·
 							<b>{data.assume.leopards}</b> COD before 15 Feb → delivered by Leopards ·
-							{data.assume.review} later COD left for you to check. Courier fee is estimated.
+							<b>{data.assume.direct}</b> later orders → collected at shop or sent by TCS (full amount received). Courier fee is estimated.
 						</span>
 						<Button type="submit" size="sm">Apply</Button>
 					</form>

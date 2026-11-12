@@ -123,7 +123,7 @@ export const actions: Actions = {
 	assume: async () => {
 		const c = await applyAssumptions();
 		return {
-			saved: `Assumed delivered: ${c.prepaid} prepaid (TCS/other) · ${c.leopards} Leopards COD. ${c.review} left for review.`
+			saved: `Assumed delivered: ${c.prepaid} prepaid · ${c.leopards} Leopards COD · ${c.direct} pickup/TCS.`
 		};
 	},
 

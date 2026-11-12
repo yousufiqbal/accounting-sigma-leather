@@ -3,8 +3,10 @@
  * Rule agreed with the owner (2026-11-12):
  *   - paid / partly paid → assumed delivered on the fulfilment date (TCS / other)
  *   - COD before LEOPARDS_UNTIL → assumed delivered by Leopards on the fulfilment date
- *   - COD after that → left for manual review
+ *   - COD after that → owner confirmed: paid and either collected at shop or sent by TCS
+ *     without a tracking record → assumed delivered, full amount received
  * Courier fee unknown → median PostEx delivery fee (incl. tax), flagged as estimated.
+ * Known self-pickups (PICKUP_ORDERS) get no courier fee.
  * Idempotent: one assumed parcel per order (tracking "A-<order>").
  */
 import { and, eq, gte, isNull, lte, or, sql } from 'drizzle-orm';
@@ -12,6 +14,8 @@ import { db, schema } from './db/index.js';
 
 export const LEOPARDS_UNTIL = '2026-02-15T00:00:00+05:00';
 export const SETTLE_DAYS = 14; // give courier data this long to arrive before assuming
+/** Collected by the customer at the shop: no courier, no fee. */
+export const PICKUP_ORDERS = ['2152'];
 
 const o = schema.orders;
 const PAID = ['PAID', 'PARTIALLY_PAID', 'PARTIALLY_REFUNDED', 'REFUNDED'];
@@ -27,7 +31,7 @@ function candidatesWhere() {
 	);
 }
 
-type Kind = 'prepaid' | 'leopards' | 'review';
+type Kind = 'prepaid' | 'leopards' | 'direct';
 function classify(r: {
 	financialStatus: string | null;
 	isPrepaid: boolean;
@@ -35,7 +39,7 @@ function classify(r: {
 }): Kind {
 	if (r.isPrepaid || PAID.includes(r.financialStatus ?? '')) return 'prepaid';
 	if (new Date(r.createdAt) < new Date(LEOPARDS_UNTIL)) return 'leopards';
-	return 'review';
+	return 'direct';
 }
 
 async function candidates() {
@@ -56,7 +60,7 @@ async function candidates() {
 
 export async function previewAssumptions() {
 	const rows = await candidates();
-	const counts = { prepaid: 0, leopards: 0, review: 0 };
+	const counts = { prepaid: 0, leopards: 0, direct: 0 };
 	for (const r of rows) counts[classify(r)]++;
 	return counts;
 }
@@ -81,14 +85,23 @@ export async function applyAssumptions() {
 	const rows = await candidates();
 	const fee = await estimatedFee();
 	const now = new Date().toISOString();
-	const counts = { prepaid: 0, leopards: 0, review: 0 };
+	const counts = { prepaid: 0, leopards: 0, direct: 0 };
 	const stmts = [];
 	for (const r of rows) {
 		const kind = classify(r);
 		counts[kind]++;
-		if (kind === 'review' || !r.fulfilledAt) continue;
+		if (!r.fulfilledAt) continue;
 		// Prepaid: only the unpaid remainder (if any) is collected on delivery.
 		const cash = kind === 'prepaid' ? Math.max(0, r.outstanding) : r.outstanding || r.total;
+		const pickup = PICKUP_ORDERS.includes(r.name);
+		const parcelFee = pickup ? 0 : fee;
+		const label = pickup
+			? 'Self pickup at shop'
+			: kind === 'prepaid'
+				? 'Assumed: prepaid (TCS/other)'
+				: kind === 'leopards'
+					? 'Assumed: Leopards'
+					: 'Assumed: pickup / TCS (no tracking)';
 		stmts.push(
 			db
 				.insert(schema.shipments)
