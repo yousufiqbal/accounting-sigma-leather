@@ -311,7 +311,9 @@ export const expenses = sqliteTable(
 		id: id(),
 		date: text('date').notNull(), // YYYY-MM-DD
 		categoryId: text('category_id').notNull(),
-		amount: money('amount_paisa'),
+		amount: money('amount_paisa'), // PKR actually paid (what the P&L uses)
+		usdCents: integer('usd_cents'), // optional: original USD amount (card payments)
+		fxRateX10000: integer('fx_rate_x10000'), // optional: PKR per 1 USD × 10^4
 		note: text('note'),
 		recurringId: text('recurring_id'),
 		createdAt: createdAt()
