@@ -35,8 +35,8 @@
 		{ id: 'returned', label: 'Returned to stock', cost: false },
 		{ id: 'damaged', label: 'Damaged', cost: true },
 		{ id: 'missing', label: 'Missing / lost', cost: true },
-		{ id: 'count', label: 'Count fix', cost: true },
-		{ id: 'ignore', label: 'Ignore', cost: false }
+		{ id: 'count', label: 'Lost in recount', cost: true },
+		{ id: 'ignore', label: 'Count was wrong (no cost)', cost: false }
 	] as const;
 
 	const dirty = $derived(Object.keys(edits).length);
