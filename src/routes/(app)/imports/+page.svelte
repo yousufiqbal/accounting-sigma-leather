@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -94,7 +95,7 @@
 			<Sheet.Title>New import</Sheet.Title>
 			<Sheet.Description>Rates can be changed later until the batch lands.</Sheet.Description>
 		</Sheet.Header>
-		<form method="POST" action="?/create" use:enhance class="grid gap-4 px-4">
+		<form method="POST" action={formAction('create')} use:enhance class="grid gap-4 px-4">
 			{#if form?.error}
 				<div class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger" role="alert">
 					<TriangleAlert class="mt-0.5 size-4 shrink-0" />{form.error}

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -134,7 +135,7 @@
 										<Button size="icon-sm" variant="ghost" aria-label="Edit" onclick={() => openForm(e)}><Pencil /></Button>
 										<form
 											method="POST"
-											action="?/delete"
+											action={formAction('delete')}
 											use:enhance={({ cancel }) => {
 												if (!confirm(`Delete ${formatRs(e.amount)} ${catById.get(e.categoryId)?.name ?? ''}?`)) cancel();
 											}}
@@ -160,7 +161,7 @@
 
 	<details class="text-sm">
 		<summary class="cursor-pointer text-muted-foreground">Add a category</summary>
-		<form method="POST" action="?/addCategory" use:enhance class="mt-2 flex flex-wrap items-end gap-2">
+		<form method="POST" action={formAction('addCategory')} use:enhance class="mt-2 flex flex-wrap items-end gap-2">
 			<Input name="name" placeholder="Name" class="w-48" aria-label="Category name" />
 			<select name="group" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Group">
 				<option value="operating">Operating</option>
@@ -179,7 +180,7 @@
 		</Sheet.Header>
 		<form
 			method="POST"
-			action="?/save"
+			action={formAction('save')}
 			class="grid gap-4 px-4"
 			use:enhance={() => {
 				saving = true;

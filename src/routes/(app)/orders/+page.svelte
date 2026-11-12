@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -74,7 +75,7 @@
 		</div>
 		<form
 			method="POST"
-			action="?/sync"
+			action={formAction('sync')}
 			class="flex gap-2"
 			use:enhance={({ formData }) => {
 				syncing = String(formData.get('mode'));
@@ -161,7 +162,7 @@
 				{#if data.assume && data.assume.prepaid + data.assume.leopards + data.assume.direct > 0}
 					<form
 						method="POST"
-						action="?/assume"
+						action={formAction('assume')}
 						use:enhance
 						class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm"
 					>
@@ -290,7 +291,7 @@
 		{#if target}
 			<form
 				method="POST"
-				action="?/manualDelivery"
+				action={formAction('manualDelivery')}
 				class="grid gap-4 px-4"
 				use:enhance={() => {
 					saving = true;

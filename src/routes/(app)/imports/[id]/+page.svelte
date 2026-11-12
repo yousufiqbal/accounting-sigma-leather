@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
@@ -88,14 +89,14 @@
 		{#if !locked}
 			<div class="flex flex-wrap items-end gap-2">
 				{#if b.status === 'draft'}
-					<form method="POST" action="?/paid" use:enhance={act('paid')} class="flex items-end gap-2">
+					<form method="POST" action={formAction('paid')} use:enhance={act('paid')} class="flex items-end gap-2">
 						<Input type="date" name="date" value={today} class="h-9 w-40" aria-label="Paid on" />
 						<Button type="submit" variant="outline" disabled={!!busy}>Mark paid</Button>
 					</form>
 				{/if}
 				<form
 					method="POST"
-					action="?/land"
+					action={formAction('land')}
 					class="flex items-end gap-2"
 					use:enhance={({ cancel }) => {
 						if (dirty) {
@@ -155,7 +156,7 @@
 		</Card.Header>
 		{#if !locked}
 			<Card.Content class="grid gap-3">
-				<form method="POST" action="?/add" use:enhance={act('add')} class="flex flex-wrap items-end gap-2">
+				<form method="POST" action={formAction('add')} use:enhance={act('add')} class="flex flex-wrap items-end gap-2">
 					<div class="grid min-w-72 flex-1 gap-1.5">
 						<Label for="variant">Product</Label>
 						<Input id="variant" name="variant" list="variant-options" placeholder="Type name or SKU…" autocomplete="off" />
@@ -174,7 +175,7 @@
 					<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
 				</form>
 				{#if showPaste}
-					<form method="POST" action="?/paste" use:enhance={act('paste', () => (showPaste = false))} class="grid gap-2">
+					<form method="POST" action={formAction('paste')} use:enhance={act('paste', () => (showPaste = false))} class="grid gap-2">
 						<Textarea
 							name="lines"
 							rows={6}
@@ -244,7 +245,7 @@
 								<div class="flex items-center justify-end gap-1">
 									<Money paisa={l.landed * l.qty} />
 									{#if !locked}
-										<form method="POST" action="?/remove" use:enhance={act('remove')}>
+										<form method="POST" action={formAction('remove')} use:enhance={act('remove')}>
 											<input type="hidden" name="itemId" value={l.id} />
 											<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
 										</form>
@@ -275,7 +276,7 @@
 						<span class="flex items-center gap-1">
 							<Money paisa={c.amount} />
 							{#if !locked}
-								<form method="POST" action="?/removeCost" use:enhance={act('removeCost')}>
+								<form method="POST" action={formAction('removeCost')} use:enhance={act('removeCost')}>
 									<input type="hidden" name="costId" value={c.id} />
 									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
 								</form>
@@ -286,7 +287,7 @@
 					<p class="text-sm text-muted-foreground">None.</p>
 				{/each}
 				{#if !locked}
-					<form method="POST" action="?/addCost" use:enhance={act('cost')} class="flex flex-wrap items-end gap-2">
+					<form method="POST" action={formAction('addCost')} use:enhance={act('cost')} class="flex flex-wrap items-end gap-2">
 						<select name="type" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Type">
 							<option value="local_cartage">Local cartage</option>
 							<option value="other">Other</option>
@@ -302,7 +303,7 @@
 		<Card.Root>
 			<Card.Header><Card.Title>Details</Card.Title></Card.Header>
 			<Card.Content>
-				<form method="POST" action="?/header" use:enhance={act('header')} class="grid gap-3">
+				<form method="POST" action={formAction('header')} use:enhance={act('header')} class="grid gap-3">
 					<fieldset disabled={locked} class="grid gap-3 sm:grid-cols-2">
 						<div class="grid gap-1.5"><Label for="ref">Name</Label><Input id="ref" name="ref" value={b.ref} /></div>
 						<div class="grid gap-1.5"><Label for="supplier">Supplier</Label><Input id="supplier" name="supplier" value={b.supplier ?? ''} /></div>
@@ -321,7 +322,7 @@
 				{#if !locked}
 					<form
 						method="POST"
-						action="?/delete"
+						action={formAction('delete')}
 						class="mt-3 border-t pt-3"
 						use:enhance={({ cancel }) => {
 							if (!confirm(`Delete import "${b.ref}" and its ${data.lines.length} items?`)) return cancel();
@@ -338,7 +339,7 @@
 {#if dirty}
 	<form
 		method="POST"
-		action="?/items"
+		action={formAction('items')}
 		use:enhance={act('items', () => (edits = {}))}
 		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
 	>

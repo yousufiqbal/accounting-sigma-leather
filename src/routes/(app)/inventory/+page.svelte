@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -128,7 +129,7 @@
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
-			<form method="POST" action="?/refresh" use:enhance={act('refresh')}>
+			<form method="POST" action={formAction('refresh')} use:enhance={act('refresh')}>
 				<Button type="submit" variant="outline" disabled={!!busy}>
 					<RefreshCw class={busy === 'refresh' ? 'animate-spin' : ''} />
 					{busy === 'refresh' ? 'Pulling…' : 'Pull from Shopify'}
@@ -139,7 +140,7 @@
 			</Button>
 			<form
 				method="POST"
-				action="?/upload"
+				action={formAction('upload')}
 				enctype="multipart/form-data"
 				use:enhance={act('upload')}
 				class="flex gap-2"
@@ -210,7 +211,7 @@
 				</Card.Description>
 			</Card.Header>
 			{#if data.changes.length}
-				<form method="POST" action="?/classify" use:enhance={act('classify', () => (picked = []))}>
+				<form method="POST" action={formAction('classify')} use:enhance={act('classify', () => (picked = []))}>
 					<Card.Content class="flex flex-wrap items-center gap-2 border-y bg-muted/40 py-2">
 						<span class="text-sm text-muted-foreground">{picked.length} selected</span>
 						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty > 0).map((c) => c.id))}>Select all +</Button>
@@ -263,7 +264,7 @@
 			<Card.Content>
 				<form
 					method="POST"
-					action="?/rates"
+					action={formAction('rates')}
 					use:enhance={act('rates')}
 					class="flex flex-wrap items-end gap-3"
 				>
@@ -313,7 +314,7 @@
 				<Card.Content>
 					<form
 						method="POST"
-						action="?/opening"
+						action={formAction('opening')}
 						use:enhance={({ cancel }) => {
 							if (!confirm('Record current Shopify stock as opening stock? This is done once.'))
 								return cancel();
@@ -461,7 +462,7 @@
 {#if dirty}
 	<form
 		method="POST"
-		action="?/save"
+		action={formAction('save')}
 		use:enhance={act('save', () => (edits = {}))}
 		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
 	>

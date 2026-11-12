@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -53,12 +54,12 @@
 			</p>
 		</div>
 		<div class="flex gap-2">
-			<form method="POST" action="?/discard" use:enhance>
+			<form method="POST" action={formAction('discard')} use:enhance>
 				<Button type="submit" variant="ghost">Discard</Button>
 			</form>
 			<form
 				method="POST"
-				action="?/commit"
+				action={formAction('commit')}
 				use:enhance={() => {
 					busy = true;
 					return async ({ update }) => {

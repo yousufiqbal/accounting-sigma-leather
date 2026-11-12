@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -104,7 +105,7 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<form
 				method="POST"
-				action="?/sync"
+				action={formAction('sync')}
 				use:enhance={({ formData }) => {
 					syncing = String(formData.get('mode'));
 					return async ({ update }) => {
@@ -130,7 +131,7 @@
 			</form>
 			<form
 				method="POST"
-				action="?/upload"
+				action={formAction('upload')}
 				enctype="multipart/form-data"
 				use:enhance={() => {
 					uploading = true;
@@ -322,7 +323,7 @@
 								{#if p.matchStatus === 'unmatched' && p.status !== 'cancelled'}
 									<form
 										method="POST"
-										action="?/link"
+										action={formAction('link')}
 										use:enhance
 										class="mt-1 flex items-center gap-1"
 									>
@@ -338,7 +339,7 @@
 											type="submit"
 											size="xs"
 											variant="ghost"
-											formaction="?/exclude"
+											formaction={formAction('exclude')}
 											formnovalidate>Exclude</Button
 										>
 									</form>
@@ -356,7 +357,7 @@
 								<StatusBadge status={p.status} />
 								{#if p.conflictNote}
 									<div class="mt-1 max-w-64 text-xs text-danger">{p.conflictNote}</div>
-									<form method="POST" action="?/resolve" use:enhance>
+									<form method="POST" action={formAction('resolve')} use:enhance>
 										<input type="hidden" name="shipmentId" value={p.id} />
 										<Button type="submit" size="xs" variant="ghost">Mark reviewed</Button>
 									</form>

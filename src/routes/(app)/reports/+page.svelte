@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import Lock from '@lucide/svelte/icons/lock';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
@@ -63,7 +64,7 @@
 			</h1>
 			<p class="text-sm text-muted-foreground">Sales count in the month the parcel was delivered.</p>
 		</div>
-		<form method="POST" action={p.status === 'locked' ? '?/unlock' : '?/lock'} use:enhance>
+		<form method="POST" action={formAction(p.status === 'locked' ? 'unlock' : 'lock')} use:enhance>
 			<input type="hidden" name="month" value={p.month} />
 			{#if p.status === 'locked'}
 				<Button type="submit" variant="outline"><LockOpen /> Unlock month</Button>
