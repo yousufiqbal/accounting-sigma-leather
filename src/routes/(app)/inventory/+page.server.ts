@@ -112,10 +112,31 @@ export const load: PageServerLoad = async ({ url }) => {
 		.where(and(eq(sm.type, 'variance'), isNull(sm.reason)))
 		.orderBy(desc(sm.at), asc(v.productTitle))
 		.limit(300);
+	// Decisions from the last 90 days stay changeable (a wrong reason can be fixed).
+	const since = new Date(Date.now() - 90 * 86_400_000).toISOString();
+	const decided = await db
+		.select({
+			id: sm.id,
+			at: sm.at,
+			qty: sm.qtyDelta,
+			unitCost: sm.unitCost,
+			avgCost: v.avgCost,
+			reason: sm.reason,
+			productTitle: v.productTitle,
+			imageUrl: v.imageUrl,
+			variantTitle: v.variantTitle,
+			sku: v.sku
+		})
+		.from(sm)
+		.leftJoin(v, eq(v.id, sm.variantId))
+		.where(and(eq(sm.type, 'variance'), sql`${sm.reason} is not null`, sql`${sm.at} >= ${since}`))
+		.orderBy(desc(sm.at), asc(v.productTitle))
+		.limit(200);
 	const lastCheck = await db.query.settings.findFirst({ where: eq(schema.settings.key, 'stock_checked_at') });
 
 	return {
 		changes,
+		decided,
 		lastStockCheck: lastCheck ? (JSON.parse(lastCheck.value) as string) : null,
 		elsewhere: await stockElsewhere(),
 		view,
@@ -285,7 +306,7 @@ export const actions: Actions = {
 		if (!VARIANCE_REASONS.includes(reason)) return fail(400, { error: 'Pick a reason.' });
 		const ids = f.getAll('id').map(String).filter(Boolean);
 		const n = await classifyStockChanges(ids, reason);
-		return { saved: `${n} stock change${n === 1 ? '' : 's'} marked “${reason}”.` };
+		return { saved: `${n} stock change${n === 1 ? '' : 's'} updated.` };
 	},
 
 	opening: async () => {

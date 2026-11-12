@@ -31,13 +31,15 @@
 	let picked = $state<string[]>([]);
 	let changesOpen = $state(false);
 	let ratesOpen = $state(false);
+	/** cost: true → inventory write-off (expense); false → no effect on profit. */
 	const REASONS = [
 		{ id: 'returned', label: 'Returned to stock', cost: false },
+		{ id: 'ignore', label: "Wasn't real stock", cost: false },
 		{ id: 'damaged', label: 'Damaged', cost: true },
 		{ id: 'missing', label: 'Missing / lost', cost: true },
-		{ id: 'count', label: 'Lost in recount', cost: true },
-		{ id: 'ignore', label: 'Count was wrong (no cost)', cost: false }
+		{ id: 'count', label: 'Lost in recount', cost: true }
 	] as const;
+	const reasonOf = (id: string | null) => REASONS.find((r) => r.id === id);
 
 	const dirty = $derived(Object.keys(edits).length);
 	const fxRs = $derived(data.rates.rmbFx / 10_000);
@@ -217,6 +219,14 @@
 		<span>{s.value ? formatPct(Number(s.estimatedValue) / Number(s.value)) : '—'} of warehouse value is estimated</span>
 	</div>
 
+	{#if !data.changes.length && data.decided.length}
+		<p class="-mt-3 text-sm text-muted-foreground">
+			Stock changes made in Shopify: none waiting ·
+			<button type="button" class="underline underline-offset-2 hover:text-foreground" onclick={() => (changesOpen = true)}>
+				review {data.decided.length} recent decision{data.decided.length === 1 ? '' : 's'}
+			</button>
+		</p>
+	{/if}
 	{#if data.changes.length}
 		<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-sm text-warning">
 			<span>
@@ -246,8 +256,7 @@
 			</div>
 			<Card.Description>
 				Type the China price per piece. DDP / pc is weight × DDP rate unless you type one — “Local” sets 0
-				for items bought in Pakistan; amber = DDP above 2× the goods cost. Tick “correct” if the Shopify
-				cost is already the full landed cost. Most stock first.
+				for items bought in Pakistan; amber = DDP above 2× the goods cost. Products with the most stock first.
 				{#if data.view === 'noweight'}Weights are edited in Shopify, then “Pull from Shopify”.{/if}
 			</Card.Description>
 		</Card.Header>
@@ -258,7 +267,6 @@
 						<Table.Head class="pl-6">Product</Table.Head>
 						<Table.Head class="text-right">On hand</Table.Head>
 						<Table.Head class="text-right">Weight</Table.Head>
-						<Table.Head class="text-right">Shopify cost</Table.Head>
 						<Table.Head>China price</Table.Head>
 						<Table.Head>DDP / pc</Table.Head>
 						<Table.Head class="text-right">Cost used</Table.Head>
@@ -287,18 +295,6 @@
 							<Table.Cell class="num text-right">{r.onHand ?? 0}</Table.Cell>
 							<Table.Cell class="num text-right">
 								{#if r.weightG}{r.weightG} g{:else}<span class="text-danger">—</span>{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right">
-								{#if r.shopifyCost}
-									<Money paisa={r.shopifyCost} />
-									<label class="mt-0.5 flex items-center justify-end gap-1 text-xs text-muted-foreground">
-										<input
-											type="checkbox"
-											checked={e.ok}
-											onchange={(ev) => set(r, { ok: ev.currentTarget.checked })}
-										/> correct
-									</label>
-								{:else}<span class="text-muted-foreground">—</span>{/if}
 							</Table.Cell>
 							<Table.Cell>
 								<div class="flex items-center gap-1">
@@ -358,7 +354,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
+							<Table.Cell colspan={7} class="py-10 text-center text-muted-foreground">
 								Nothing here.
 							</Table.Cell>
 						</Table.Row>
@@ -404,7 +400,7 @@
 {/if}
 
 <Sheet.Root bind:open={changesOpen}>
-	<Sheet.Content side="right" class="w-full sm:max-w-2xl">
+	<Sheet.Content side="right" class="w-full sm:max-w-2xl!">
 		<Sheet.Header>
 			<Sheet.Title>Stock changes made in Shopify</Sheet.Title>
 			<Sheet.Description>
@@ -422,7 +418,7 @@
 						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty < 0).map((c) => c.id))}>Select all −</Button>
 						<span class="ml-auto flex flex-wrap gap-1">
 							{#each REASONS as r (r.id)}
-								<Button type="submit" name="reason" value={r.id} size="xs" variant={r.cost ? 'outline' : 'secondary'} disabled={!picked.length || !!busy}>{r.label}</Button>
+								<Button type="submit" name="reason" value={r.id} size="xs" variant={r.cost ? 'outline' : 'secondary'} disabled={!picked.length || !!busy}>{r.label}{r.cost ? ' (write-off)' : ''}</Button>
 							{/each}
 						</span>
 					</div>
@@ -458,7 +454,52 @@
 				</form>
 			</div>
 		{:else}
-			<p class="px-4 text-sm text-muted-foreground">Nothing to review.</p>
+			<p class="px-4 text-sm text-muted-foreground">Nothing waiting for a reason.</p>
+		{/if}
+
+		{#if data.decided.length}
+			<div class="grid gap-2 border-t px-4 pt-4 pb-6">
+				<div>
+					<p class="text-sm font-medium">Recently decided (last 90 days)</p>
+					<p class="text-xs text-muted-foreground">
+						Picked the wrong reason? Change it here — the income statement updates. “Wasn't real stock” and “Returned”
+						cost nothing; damaged, missing and lost-in-recount are write-offs.
+					</p>
+				</div>
+				<div class="grid max-h-[24rem] gap-1 overflow-auto pr-1">
+					{#each data.decided as d (d.id)}
+						{@const r = reasonOf(d.reason)}
+						{@const value = -d.qty * (d.unitCost || d.avgCost || 0)}
+						<div class="flex items-center gap-3 rounded-md px-1 py-1.5 hover:bg-muted/50">
+							<Thumb src={d.imageUrl} alt={`${d.productTitle ?? ''} ${d.variantTitle ?? ''}`} size={32} />
+							<div class="min-w-0 flex-1">
+								<div class="truncate text-sm">{d.productTitle ?? 'Deleted product'}</div>
+								<div class="truncate text-xs text-muted-foreground">
+									{d.variantTitle ?? ''} · {new Date(d.at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Karachi' })}
+								</div>
+							</div>
+							<div class={['num w-14 text-right text-sm font-medium', d.qty < 0 ? 'text-danger' : 'text-success']}>
+								{d.qty > 0 ? '+' : ''}{d.qty}
+							</div>
+							<div class="w-28 text-right text-xs">
+								{#if r?.cost && value > 0}<span class="text-danger">write-off {formatRs(value)}</span>{:else}<span class="text-muted-foreground">no cost</span>{/if}
+							</div>
+							<form method="POST" action={formAction('classify')} use:enhance={act('classify')}>
+								<input type="hidden" name="id" value={d.id} />
+								<select
+									name="reason"
+									class="h-8 rounded-md border bg-background px-1.5 text-sm"
+									value={d.reason}
+									onchange={(e) => e.currentTarget.form?.requestSubmit()}
+									aria-label="Reason"
+								>
+									{#each REASONS as o (o.id)}<option value={o.id}>{o.label}{o.cost ? ' (write-off)' : ''}</option>{/each}
+								</select>
+							</form>
+						</div>
+					{/each}
+				</div>
+			</div>
 		{/if}
 	</Sheet.Content>
 </Sheet.Root>
