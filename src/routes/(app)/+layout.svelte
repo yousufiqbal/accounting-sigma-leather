@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { page } from '$app/state';
+	import { navigating, page } from '$app/state';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { mode, toggleMode } from 'mode-watcher';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
@@ -192,6 +193,12 @@
 	</Sidebar.Root>
 
 	<Sidebar.Inset>
+		{#if navigating.to}
+			<!-- Page / month loading: indeterminate bar along the top. -->
+			<div class="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/15" role="progressbar" aria-label="Loading">
+				<div class="nav-progress h-full w-1/3 bg-primary"></div>
+			</div>
+		{/if}
 		<header
 			class="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur"
 		>
@@ -201,8 +208,13 @@
 					<ChevronLeft />
 				</Button>
 				<span class="flex min-w-36 items-center justify-center gap-1.5 text-sm font-medium">
-					{monthLabel(data.month)}
-					{#if data.month === currentMonth()}
+					{#if navigating.to && navigating.to.url.searchParams.get('m') !== data.month}
+						<LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
+						{monthLabel(navigating.to.url.searchParams.get('m') ?? data.month)}
+					{:else}
+						{monthLabel(data.month)}
+					{/if}
+					{#if !navigating.to && data.month === currentMonth()}
 						<span class="size-1.5 rounded-full bg-success" title="Current month"></span>
 					{/if}
 				</span>
@@ -211,7 +223,13 @@
 				</Button>
 			</div>
 		</header>
-		<main class="mx-auto w-full max-w-7xl p-4 md:p-6">
+		<main
+			class={[
+				'mx-auto w-full max-w-7xl p-4 transition-opacity md:p-6',
+				navigating.to ? 'pointer-events-none opacity-55 delay-150 duration-200' : 'duration-100'
+			]}
+			aria-busy={!!navigating.to}
+		>
 			{@render children()}
 		</main>
 	</Sidebar.Inset>
