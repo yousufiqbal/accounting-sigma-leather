@@ -70,6 +70,13 @@
 			.map((w) => w[0].toUpperCase())
 			.join('');
 
+	/** What each sidebar bubble counts (shown on hover). */
+	const BADGE_HINT: Record<string, string> = {
+		couriers: 'parcels need a decision (conflicting data or not linked to an order) — see Needs attention',
+		inventory: 'stock changes made in Shopify need a reason'
+	};
+	const hint = (key: string, n: number) => `${n} ${BADGE_HINT[key] ?? 'to check'}`;
+
 	/** Roomy rows, muted icons, active = filled pill with a primary icon. */
 	const item =
 		'h-9 gap-3 px-2.5 text-[13.5px] text-sidebar-foreground/75 hover:text-sidebar-foreground [&_svg]:text-sidebar-foreground/50 data-active:bg-sidebar-accent data-active:text-sidebar-foreground data-active:shadow-xs data-active:[&_svg]:text-sidebar-primary hover:[&_svg]:text-sidebar-foreground';
@@ -105,11 +112,11 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={isActive(n.href)}
-							tooltipContent={count ? `${n.label} · ${count} to check` : n.label}
+							tooltipContent={count ? `${n.label} · ${hint('badge' in n ? n.badge : '', count)}` : n.label}
 							class={item}
 						>
 							{#snippet child({ props })}
-								<a href={navHref(n.href)} {...props}>
+								<a href={navHref(n.href)} {...props} title={count ? hint('badge' in n ? n.badge : '', count) : undefined}>
 									<n.icon />
 									<span>{n.label}</span>
 								</a>
