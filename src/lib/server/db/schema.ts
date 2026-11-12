@@ -191,6 +191,8 @@ export const shipments = sqliteTable(
 		trackingNo: text('tracking_no').notNull(),
 		originalTrackingNo: text('original_tracking_no'),
 		orderRefRaw: text('order_ref_raw'),
+		orderName: text('order_name'), // normalized Shopify order number, e.g. "2657"
+		extraParcel: integer('extra_parcel', { mode: 'boolean' }).notNull().default(false), // "1326-2"
 		orderId: text('order_id'),
 		matchStatus: text('match_status', { enum: ['auto', 'manual', 'unmatched', 'excluded'] })
 			.notNull()
@@ -218,6 +220,7 @@ export const shipments = sqliteTable(
 		taxesEstimated: integer('taxes_estimated', { mode: 'boolean' }).notNull().default(false),
 		statementId: text('statement_id'),
 		settledAt: text('settled_at'),
+		conflictNote: text('conflict_note'), // set when a source disagrees; needs review
 		raw: text('raw'), // json of last source row
 		createdAt: createdAt(),
 		updatedAt: text('updated_at')
@@ -225,6 +228,7 @@ export const shipments = sqliteTable(
 	(t) => [
 		uniqueIndex('shipments_courier_tracking_idx').on(t.courier, t.trackingNo),
 		index('shipments_order_idx').on(t.orderId),
+		index('shipments_order_name_idx').on(t.orderName),
 		index('shipments_final_idx').on(t.finalAt),
 		index('shipments_statement_idx').on(t.statementId)
 	]
@@ -264,6 +268,16 @@ export const importFiles = sqliteTable('import_files', {
 	courier: text('courier').notNull(),
 	counts: text('counts'), // json
 	importedAt: createdAt()
+});
+
+/** Parsed file awaiting the admin's confirm on the preview screen. */
+export const pendingImports = sqliteTable('pending_imports', {
+	id: id(),
+	sha256: text('sha256').notNull(),
+	filename: text('filename').notNull(),
+	courier: text('courier').notNull(),
+	payload: text('payload').notNull(), // json ParsedFile
+	createdAt: createdAt()
 });
 
 // ─── Expenses ──────────────────────────────────────────────────────────────────
