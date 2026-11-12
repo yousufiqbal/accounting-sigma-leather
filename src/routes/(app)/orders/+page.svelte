@@ -55,7 +55,7 @@
 
 	const views = $derived([
 		{ id: 'month', label: `Placed in ${monthLabel(data.month)}` },
-		{ id: 'nocourier', label: `Shipped, no courier data (${data.noCourierCount})` },
+		{ id: 'nocourier', label: `Waiting for courier data (${data.noCourierCount})` },
 		{ id: 'all', label: 'All' }
 	]);
 </script>
@@ -156,25 +156,10 @@
 			</div>
 			{#if data.view === 'nocourier'}
 				<Card.Description>
-					Fulfilled in Shopify but no PostEx/DEX parcel found — e.g. TCS, Leopards, pickup, own
-					rider. Record what happened so revenue is counted.
+					Shipped with a tracking number, but no PostEx/DEX data yet. Orders shipped without
+					tracking count as delivered right away; tracked ones are assumed delivered after 14 days
+					if no courier data arrives.
 				</Card.Description>
-				{#if data.assume && data.assume.prepaid + data.assume.leopards + data.assume.direct > 0}
-					<form
-						method="POST"
-						action={formAction('assume')}
-						use:enhance
-						class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm"
-					>
-						<span class="text-warning">
-							Ready to apply the standard rule to orders fulfilled 14+ days ago:
-							<b>{data.assume.prepaid}</b> prepaid → delivered on fulfilment date (TCS/other) ·
-							<b>{data.assume.leopards}</b> COD before 15 Feb → delivered by Leopards ·
-							<b>{data.assume.direct}</b> later orders → collected at shop or sent by TCS (full amount received). Courier fee is estimated.
-						</span>
-						<Button type="submit" size="sm">Apply</Button>
-					</form>
-				{/if}
 			{/if}
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
@@ -240,7 +225,7 @@
 											>{/if}
 									</div>
 								{:else}
-									{#if !ord.cancelledAt}
+									{#if !ord.cancelledAt && (ord.fulfillmentStatus === 'FULFILLED' || ord.fulfillmentStatus === 'PARTIALLY_FULFILLED')}
 										<Button size="xs" variant="outline" onclick={() => openManual(ord)}
 											>Record delivery</Button
 										>

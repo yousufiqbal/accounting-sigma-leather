@@ -1,4 +1,6 @@
 /** Upload → parse → stash as pending import (preview) → commit or discard. */
+import { linkShipmentsToOrders } from '../shopify-sync.js';
+import { settleDeliveries } from '../assumptions.js';
 import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../db/index.js';
@@ -75,6 +77,8 @@ export async function commitPending(id: string) {
 		})
 		.returning({ id: schema.importFiles.id });
 	const counts = await applyMerge(plan, `file:${file.id}`);
+	await linkShipmentsToOrders();
+	await settleDeliveries();
 	await db.delete(schema.pendingImports).where(eq(schema.pendingImports.id, id));
 	return counts;
 }

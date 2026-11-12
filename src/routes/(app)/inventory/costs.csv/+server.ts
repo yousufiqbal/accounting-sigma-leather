@@ -27,6 +27,7 @@ export const GET: RequestHandler = async () => {
 		'shopify_cost_correct',
 		'china_price',
 		'currency',
+		'ddp_per_piece',
 		'cost_used'
 	];
 	const lines = rows.map((r) =>
@@ -42,6 +43,7 @@ export const GET: RequestHandler = async () => {
 			r.shopifyCostOk ? 'yes' : 'no',
 			rs(r.estCnPriceMinor),
 			r.estCurrency ?? 'RMB',
+			rs(r.estDdp),
 			rs(r.avgCost)
 		]
 			.map(cell)

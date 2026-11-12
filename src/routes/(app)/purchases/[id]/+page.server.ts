@@ -10,7 +10,7 @@ const bi = schema.batchItems;
 
 export const load: PageServerLoad = async ({ params }) => {
 	const b = await loadBatch(params.id);
-	if (!b) error(404, 'Import not found');
+	if (!b) error(404, 'Purchase not found');
 	const vars = b.lines.length
 		? await db
 				.select({
@@ -50,11 +50,11 @@ export const load: PageServerLoad = async ({ params }) => {
 
 async function editable(id: string) {
 	const batch = await db.query.importBatches.findFirst({ where: eq(schema.importBatches.id, id) });
-	if (!batch) error(404, 'Import not found');
+	if (!batch) error(404, 'Purchase not found');
 	if (batch.status === 'landed') return null;
 	return batch;
 }
-const LANDED = { error: 'This import has landed and can no longer be changed.' };
+const LANDED = { error: 'This purchase has arrived and can no longer be changed.' };
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 /** Add qty to an existing line for the variant, or create one (weight from Shopify). */
@@ -256,7 +256,7 @@ export const actions: Actions = {
 			db.delete(schema.batchCosts).where(eq(schema.batchCosts.batchId, params.id)),
 			db.delete(schema.importBatches).where(eq(schema.importBatches.id, params.id))
 		]);
-		redirect(303, '/imports');
+		redirect(303, '/purchases');
 	}
 };
 

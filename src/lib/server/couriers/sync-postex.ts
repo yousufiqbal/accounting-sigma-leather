@@ -1,5 +1,7 @@
 /** Pull parcels from the PostEx API and merge them. Also links settled parcels to their CPR. */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { linkShipmentsToOrders } from '../shopify-sync.js';
+import { settleDeliveries } from '../assumptions.js';
 import { db, schema } from '../db/index.js';
 import { postexGet } from '../postex.js';
 import { applyMerge, planMerge } from './merge.js';
@@ -45,6 +47,8 @@ export async function syncPostex(mode: 'recent' | 'full' = 'recent'): Promise<Po
 		const plan = await planMerge('postex', rows);
 		const counts = await applyMerge(plan, 'api');
 		const cpr = await linkPostexCprs();
+		await linkShipmentsToOrders();
+		await settleDeliveries();
 
 		const result = { fetched: rows.length, ...counts, ...cpr };
 		await db

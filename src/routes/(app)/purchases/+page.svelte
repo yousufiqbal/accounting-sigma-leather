@@ -29,12 +29,12 @@
 <div class="grid gap-6">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<h1 class="text-2xl font-semibold tracking-tight">Imports (China)</h1>
+			<h1 class="text-2xl font-semibold tracking-tight">Purchases</h1>
 			<p class="text-sm text-muted-foreground">
-				One batch per shipment. Landing it adds the stock in Shopify and updates average cost.
+				Stock bought from suppliers — China or local. Marking a purchase arrived adds the stock in Shopify and updates average cost.
 			</p>
 		</div>
-		<Button onclick={() => (open = true)}><Plus /> New import</Button>
+		<Button onclick={() => (open = true)}><Plus /> New purchase</Button>
 	</div>
 
 	<Card.Root>
@@ -42,7 +42,7 @@
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
-						<Table.Head class="pl-6">Shipment</Table.Head>
+						<Table.Head class="pl-6">Purchase</Table.Head>
 						<Table.Head>Status</Table.Head>
 						<Table.Head class="text-right">Items</Table.Head>
 						<Table.Head class="text-right">Units</Table.Head>
@@ -56,7 +56,7 @@
 					{#each data.batches as b (b.id)}
 						<Table.Row>
 							<Table.Cell class="pl-6">
-								<a href="/imports/{b.id}" class="font-medium hover:underline">{b.ref}</a>
+								<a href="/purchases/{b.id}" class="font-medium hover:underline">{b.ref}</a>
 								<div class="text-xs text-muted-foreground">
 									{b.supplier ?? ''}{b.supplier ? ' · ' : ''}{b.currency === 'PKR'
 										? 'Pakistani supplier'
@@ -79,7 +79,7 @@
 					{:else}
 						<Table.Row>
 							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
-								No imports yet. Stock you already have is costed on the Inventory page.
+								No purchases yet. Stock you already have is costed on the Inventory page.
 							</Table.Cell>
 						</Table.Row>
 					{/each}
@@ -92,8 +92,8 @@
 <Sheet.Root bind:open>
 	<Sheet.Content side="right">
 		<Sheet.Header>
-			<Sheet.Title>New import</Sheet.Title>
-			<Sheet.Description>Rates can be changed later until the batch lands.</Sheet.Description>
+			<Sheet.Title>New purchase</Sheet.Title>
+			<Sheet.Description>Rates can be changed later until it arrives.</Sheet.Description>
 		</Sheet.Header>
 		<form method="POST" action={formAction('create')} use:enhance class="grid gap-4 px-4">
 			{#if form?.error}
@@ -102,7 +102,7 @@
 				</div>
 			{/if}
 			<div class="grid gap-2">
-				<Label for="ref">Shipment name</Label>
+				<Label for="ref">Name</Label>
 				<Input id="ref" name="ref" placeholder="e.g. Nov-2026 batch 1" required />
 			</div>
 			<div class="grid gap-2">

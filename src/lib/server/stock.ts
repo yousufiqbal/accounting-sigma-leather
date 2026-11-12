@@ -237,7 +237,7 @@ export async function landBatch(id: string, landedOn: string) {
 				qtyDelta: p.line.qty,
 				type: 'receipt',
 				unitCost: p.line.landed,
-				reason: `Import ${b.batch.ref}`,
+				reason: `Purchase ${b.batch.ref}`,
 				refType: 'batch',
 				refId: id
 			}),
@@ -345,7 +345,7 @@ export async function classifyStockChanges(ids: string[], reason: VarianceReason
 	return r.length;
 }
 
-/** Value of goods out of the warehouse but not final yet, and paid imports not landed. */
+/** Value of goods out of the warehouse but not final yet, and paid purchases not arrived. */
 export async function stockElsewhere() {
 	const [withCourier] = (await db.all(sql`
 		select coalesce(sum(l.qty * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0)), 0) as value,

@@ -72,8 +72,8 @@
 <div class="grid gap-6 pb-20">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<a href="/imports" class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
-				><ArrowLeft class="size-3.5" /> Imports</a
+			<a href="/purchases" class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
+				><ArrowLeft class="size-3.5" /> Purchases</a
 			>
 			<h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
 				{b.ref}
@@ -325,10 +325,10 @@
 						action={formAction('delete')}
 						class="mt-3 border-t pt-3"
 						use:enhance={({ cancel }) => {
-							if (!confirm(`Delete import "${b.ref}" and its ${data.lines.length} items?`)) return cancel();
+							if (!confirm(`Delete purchase "${b.ref}" and its ${data.lines.length} items?`)) return cancel();
 						}}
 					>
-						<Button type="submit" variant="ghost" size="sm" class="text-danger">Delete import</Button>
+						<Button type="submit" variant="ghost" size="sm" class="text-danger">Delete purchase</Button>
 					</form>
 				{/if}
 			</Card.Content>

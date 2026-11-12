@@ -9,6 +9,7 @@ import { toPaisa } from '../money.js';
 import { getSetting, setSetting } from './settings.js';
 import { recomputeCosts } from './costing.js';
 import { recordStockChanges } from './stock.js';
+import { settleDeliveries } from './assumptions.js';
 
 type Money = { shopMoney: { amount: string } };
 const amt = (m: Money | null | undefined) => toPaisa(m?.shopMoney.amount ?? 0);
@@ -171,7 +172,7 @@ type OrderNode = {
 	totalOutstandingSet: Money;
 	shippingLines: { nodes: { discountedPriceSet: Money }[] };
 	discountApplications: { nodes: DiscountApp[] };
-	fulfillments: { createdAt: string }[];
+	fulfillments: { createdAt: string; trackingInfo: { number: string | null }[] }[];
 	lineItems: {
 		nodes: {
 			id: string;
@@ -201,7 +202,7 @@ const ORDER_FIELDS = `
 		... on ManualDiscountApplication { title }
 		... on AutomaticDiscountApplication { title }
 	} }
-	fulfillments(first: 5) { createdAt }
+	fulfillments(first: 5) { createdAt trackingInfo(first: 3) { number } }
 	lineItems(first: 60) { nodes {
 		id title sku quantity currentQuantity
 		variant { id }
@@ -257,6 +258,8 @@ function toRows(o: OrderNode) {
 		(!hasCod && gateways.includes('manual')) ||
 		prepaidDiscount > 0;
 	const fulfilledAt = o.fulfillments.map((f) => f.createdAt).sort()[0] ?? null;
+	const fulfillmentTracking =
+		o.fulfillments.flatMap((f) => f.trackingInfo.map((t) => t.number?.trim())).find(Boolean) ?? null;
 	const order = {
 		id: orderId,
 		name: o.name.replace(/^#/, ''),
@@ -284,6 +287,7 @@ function toRows(o: OrderNode) {
 		),
 		tags: JSON.stringify(o.tags),
 		fulfilledAt,
+		fulfillmentTracking,
 		test: o.test,
 		shopifyUpdatedAt: o.updatedAt,
 		updatedAt: new Date().toISOString()
@@ -343,7 +347,8 @@ export function syncOrders(mode: 'recent' | 'full' = 'recent') {
 		} while (after);
 		if (maxUpdated) await setSetting('shopify_orders_since', maxUpdated);
 		const links = await linkShipmentsToOrders();
-		return { orders: count, ...links };
+		const delivered = await settleDeliveries();
+		return { orders: count, ...links, assumedDelivered: delivered.created };
 	});
 }
 

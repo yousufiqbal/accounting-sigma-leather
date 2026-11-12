@@ -42,15 +42,29 @@ export function ddpCost(weightG: number | null, ddpPerKg: number) {
 	return Math.round(((weightG ?? 0) * ddpPerKg) / 1000);
 }
 
+/** DDP per piece: override if set (0 = local), else weight × rate; PKR (local) prices default to 0. */
+export function estDdp(
+	row: { estCurrency: 'RMB' | 'PKR' | null; weightG: number | null; estDdp: number | null },
+	r: CostRates
+) {
+	if (row.estDdp !== null) return row.estDdp;
+	return (row.estCurrency ?? 'RMB') === 'PKR' ? 0 : ddpCost(row.weightG, r.ddpPerKg);
+}
+
 export function estimate(
-	row: { estCnPriceMinor: number | null; estCurrency: 'RMB' | 'PKR' | null; weightG: number | null },
+	row: {
+		estCnPriceMinor: number | null;
+		estCurrency: 'RMB' | 'PKR' | null;
+		weightG: number | null;
+		estDdp: number | null;
+	},
 	r: CostRates
 ): number | null {
 	if (row.estCnPriceMinor === null) return null;
 	const cur = row.estCurrency ?? 'RMB';
-	if (cur === 'PKR') return row.estCnPriceMinor;
+	if (cur === 'PKR') return row.estCnPriceMinor + estDdp(row, r);
 	if (!r.rmbFx) return null;
-	return goodsCost(row.estCnPriceMinor, cur, r.rmbFx) + ddpCost(row.weightG, r.ddpPerKg);
+	return goodsCost(row.estCnPriceMinor, cur, r.rmbFx) + estDdp(row, r);
 }
 
 /** Cost before any batch: estimate, else trusted Shopify cost. */
@@ -76,6 +90,7 @@ export async function recomputeCosts(ids?: string[]) {
 			estCnPriceMinor: v.estCnPriceMinor,
 			estCurrency: v.estCurrency,
 			weightG: v.weightG,
+			estDdp: v.estDdp,
 			shopifyCost: v.shopifyCost,
 			shopifyCostOk: v.shopifyCostOk,
 			estCost: v.estCost,
@@ -131,6 +146,8 @@ export async function saveCostInputs(
 		priceMinor: number | null;
 		currency: 'RMB' | 'PKR';
 		shopifyCostOk: boolean;
+		/** DDP per piece override; null = automatic; undefined = leave as is. */
+		ddp?: number | null;
 	}[]
 ) {
 	const now = new Date().toISOString();
@@ -141,6 +158,7 @@ export async function saveCostInputs(
 				estCnPriceMinor: i.priceMinor,
 				estCurrency: i.priceMinor === null ? null : i.currency,
 				shopifyCostOk: i.shopifyCostOk,
+				...(i.ddp !== undefined ? { estDdp: i.ddp } : {}),
 				updatedAt: now
 			})
 			.where(eq(v.id, i.id))

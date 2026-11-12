@@ -4,7 +4,6 @@ import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { toPaisa } from '#lib/money.js';
 import { syncOrders, syncStock } from '#lib/server/shopify-sync.js';
-import { applyAssumptions, previewAssumptions } from '#lib/server/assumptions.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 50;
@@ -13,7 +12,7 @@ type View = (typeof VIEWS)[number];
 const o = schema.orders;
 
 /** Has at least one non-cancelled parcel. */
-const hasParcel = sql`exists (select 1 from shipments s where s.order_id = ${o.id} and s.status != 'cancelled')`;
+const hasParcel = sql`exists (select 1 from shipments s where s.order_id = orders.id and s.status != 'cancelled')`;
 /** Shipped from Shopify's side, but no courier data at all. */
 const noCourierData = and(
 	isNull(o.cancelledAt),
@@ -77,7 +76,7 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 				select json_group_array(json_object(
 					'courier', s.courier, 'status', s.status, 'trackingNo', s.tracking_no,
 					'finalAt', s.final_at, 'cod', s.cod_paisa, 'label', s.courier_status, 'extra', s.extra_parcel))
-				from shipments s where s.order_id = ${o.id} and s.status != 'cancelled')`
+				from shipments s where s.order_id = orders.id and s.status != 'cancelled')`
 		})
 		.from(o)
 		.where(where)
@@ -98,7 +97,6 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		totalRows,
 		summary,
 		noCourierCount,
-		assume: view === 'nocourier' ? await previewAssumptions() : null,
 		lastSync: lastSync ? { at: lastSync.startedAt, ok: lastSync.ok } : null,
 		orders: rows.map((r) => ({
 			...r,
@@ -120,13 +118,6 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 };
 
 export const actions: Actions = {
-	assume: async () => {
-		const c = await applyAssumptions();
-		return {
-			saved: `Assumed delivered: ${c.prepaid} prepaid · ${c.leopards} Leopards COD · ${c.direct} pickup/TCS.`
-		};
-	},
-
 	sync: async ({ request }) => {
 		const mode = (await request.formData()).get('mode') === 'full' ? 'full' : 'recent';
 		try {

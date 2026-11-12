@@ -46,6 +46,8 @@ export const variants = sqliteTable(
 			.default('none'),
 		estCnPriceMinor: integer('est_cn_price_minor'), // for opening estimate, e.g. RMB fen
 		estCurrency: text('est_currency', { enum: ['RMB', 'PKR'] }),
+		/** DDP per piece override (paisa). null = weight × DDP rate (0 for PKR); 0 = local, no DDP. */
+		estDdp: integer('est_ddp_paisa'),
 		/** Computed estimate: RMB price × FX + kg × DDP (PKR price as-is). */
 		estCost: integer('est_cost_paisa'),
 		/** Owner confirmed the Shopify "cost per item" is a correct landed cost. */
@@ -157,6 +159,8 @@ export const orders = sqliteTable(
 		discountCodes: text('discount_codes'), // json [{kind,label,value,amount}]
 		tags: text('tags'), // json array
 		fulfilledAt: text('fulfilled_at'),
+		/** First tracking number on any fulfilment; null = shipped without tracking (pickup, TCS…). */
+		fulfillmentTracking: text('fulfillment_tracking'),
 		test: integer('test', { mode: 'boolean' }).notNull().default(false),
 		shopifyUpdatedAt: text('shopify_updated_at'),
 		updatedAt: text('updated_at')

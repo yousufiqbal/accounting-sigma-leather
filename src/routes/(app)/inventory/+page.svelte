@@ -21,7 +21,7 @@
 	let { data, form }: PageProps = $props();
 
 	type Row = (typeof data.rows)[number];
-	type Edit = { price: string; currency: 'RMB' | 'PKR'; ok: boolean };
+	type Edit = { price: string; currency: 'RMB' | 'PKR'; ok: boolean; ddp: string };
 
 	let edits = $state<Record<string, Edit>>({});
 	let busy = $state<string | null>(null);
@@ -42,16 +42,40 @@
 	const original = (r: Row): Edit => ({
 		price: r.cnPrice === null ? '' : String(r.cnPrice / 100),
 		currency: r.currency ?? 'RMB',
-		ok: r.shopifyCostOk
+		ok: r.shopifyCostOk,
+		ddp: r.ddp === null ? '' : String(r.ddp / 100)
 	});
 	const cur = (r: Row): Edit => edits[r.id] ?? original(r);
 
 	function set(r: Row, patch: Partial<Edit>) {
 		const next = { ...cur(r), ...patch };
 		const o = original(r);
-		if (next.price.trim() === o.price && next.currency === o.currency && next.ok === o.ok)
+		if (
+			next.price.trim() === o.price &&
+			next.currency === o.currency &&
+			next.ok === o.ok &&
+			next.ddp.trim() === o.ddp
+		)
 			delete edits[r.id];
 		else edits[r.id] = next;
+	}
+
+	/** Automatic DDP per piece (paisa): weight × rate; local (Rs) prices default to 0. */
+	const autoDdp = (r: Row, e: Edit) =>
+		e.currency === 'PKR' ? 0 : Math.round(((r.weightG ?? 0) / 1000) * ddpRs * 100);
+	/** DDP per piece used (paisa): override if typed, else automatic. */
+	function ddpUsed(r: Row): number {
+		const e = cur(r);
+		const d = Number(e.ddp.replace(/,/g, ''));
+		return e.ddp.trim() !== '' && Number.isFinite(d) ? Math.round(d * 100) : autoDdp(r, e);
+	}
+	/** DDP looks high: more than 2× the goods cost. */
+	function ddpHigh(r: Row): boolean {
+		const e = cur(r);
+		const p = Number(e.price.replace(/,/g, ''));
+		if (!p || e.ddp.trim() !== '') return false;
+		const goods = e.currency === 'PKR' ? p * 100 : p * fxRs * 100;
+		return ddpUsed(r) > goods * 2;
 	}
 
 	/** Live preview of the estimate in paisa (null = no price). */
@@ -59,9 +83,9 @@
 		const e = cur(r);
 		const p = Number(e.price.replace(/,/g, ''));
 		if (e.price.trim() === '' || !Number.isFinite(p)) return null;
-		if (e.currency === 'PKR') return Math.round(p * 100);
+		if (e.currency === 'PKR') return Math.round(p * 100) + ddpUsed(r);
 		if (!fxRs) return null;
-		return Math.round((p * fxRs + ((r.weightG ?? 0) / 1000) * ddpRs) * 100);
+		return Math.round(p * fxRs * 100) + ddpUsed(r);
 	}
 
 	/** Cost that will be used after saving. */
@@ -77,12 +101,12 @@
 		data.rows.filter((x) => x.productId === r.productId && x.id !== r.id);
 	function copyToSiblings(r: Row) {
 		const e = cur(r);
-		for (const s of siblings(r)) set(s, { price: e.price, currency: e.currency });
+		for (const s of siblings(r)) set(s, { price: e.price, currency: e.currency, ddp: e.ddp });
 	}
 	const firstOfProduct = (r: Row, i: number) => i === 0 || data.rows[i - 1].productId !== r.productId;
 
 	const SOURCE: Record<string, { tone: 'success' | 'warning' | 'info' | 'danger'; label: string }> = {
-		batch: { tone: 'success', label: 'from import' },
+		batch: { tone: 'success', label: 'from purchase' },
 		estimated: { tone: 'warning', label: 'estimated' },
 		shopify: { tone: 'info', label: 'Shopify cost' },
 		none: { tone: 'danger', label: 'missing' }
@@ -102,6 +126,7 @@
 		{ id: 'needs', label: `In stock, no cost (${data.counts.needs})` },
 		{ id: 'noweight', label: `No weight (${data.counts.noweight})` },
 		{ id: 'estimated', label: `Estimated (${data.counts.estimated})` },
+		{ id: 'highddp', label: `High DDP (${data.counts.highddp})` },
 		{ id: 'all', label: `All (${data.counts.all})` }
 	]);
 
@@ -189,7 +214,7 @@
 		<Stat label="With couriers" hint="{Number(data.elsewhere.withCourier.units)} units in parcels not yet delivered/returned">
 			{formatRs(Number(data.elsewhere.withCourier.value))}
 		</Stat>
-		<Stat label="On the way from China" hint="{data.elsewhere.onTheWay.units} units in paid imports">
+		<Stat label="On the way (paid purchases)" hint="{data.elsewhere.onTheWay.units} units in paid purchases">
 			{formatRs(data.elsewhere.onTheWay.value)}
 		</Stat>
 	</div>
@@ -258,7 +283,7 @@
 			<Card.Header>
 				<Card.Title>Estimate rates</Card.Title>
 				<Card.Description>
-					Used for stock you already had. New imports carry their own rates.
+					Used for stock you already had. New purchases carry their own rates.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content>
@@ -303,7 +328,7 @@
 				<Card.Title>Stock ledger</Card.Title>
 				<Card.Description>
 					{#if data.openingRecorded}
-						Opening stock recorded. New stock now enters through Imports.
+						Opening stock recorded. New stock now enters through Purchases.
 					{:else}
 						Records today's Shopify on-hand ({Number(s.units).toLocaleString('en-PK')} units) as the
 						starting point. Costs can still be filled in afterwards.
@@ -346,8 +371,9 @@
 				</form>
 			</div>
 			<Card.Description>
-				Type the China price per piece. Tick “correct” if the Shopify cost is already the full landed
-				cost. Most stock first.
+				Type the China price per piece. DDP / pc is weight × DDP rate unless you type one — “Local” sets 0
+				for items bought in Pakistan; amber = DDP above half the goods cost. Tick “correct” if the Shopify
+				cost is already the full landed cost. Most stock first.
 				{#if data.view === 'noweight'}Weights are edited in Shopify, then “Pull from Shopify”.{/if}
 			</Card.Description>
 		</Card.Header>
@@ -360,6 +386,7 @@
 						<Table.Head class="text-right">Weight</Table.Head>
 						<Table.Head class="text-right">Shopify cost</Table.Head>
 						<Table.Head>China price</Table.Head>
+						<Table.Head>DDP / pc</Table.Head>
 						<Table.Head class="text-right">Cost used</Table.Head>
 						<Table.Head class="pr-6 text-right">Stock value</Table.Head>
 					</Table.Row>
@@ -422,6 +449,26 @@
 									{/if}
 								</div>
 							</Table.Cell>
+							<Table.Cell>
+								{#if e.price}
+									<div class="flex items-center gap-1">
+										<Input
+											value={e.ddp}
+											oninput={(ev) => set(r, { ddp: ev.currentTarget.value })}
+											placeholder={(autoDdp(r, e) / 100).toFixed(0)}
+											inputmode="decimal"
+											title="Blank = weight × DDP rate. Type 0 for locally bought items."
+											class={['h-8 w-20 text-right', ddpHigh(r) && 'border-warning text-warning placeholder:text-warning']}
+											aria-label="DDP per piece"
+										/>
+										{#if e.ddp.trim() !== '0'}
+											<Button size="xs" variant="ghost" title="Bought locally — no DDP" onclick={() => set(r, { ddp: '0' })}>Local</Button>
+										{:else}
+											<Button size="xs" variant="ghost" title="Back to weight × DDP rate" onclick={() => set(r, { ddp: '' })}>Auto</Button>
+										{/if}
+									</div>
+								{:else}<span class="text-muted-foreground">—</span>{/if}
+							</Table.Cell>
 							<Table.Cell class="text-right">
 								<Money paisa={used.cost} muted />
 								<div class="mt-0.5"><StatusBadge tone={SOURCE[used.source].tone} label={SOURCE[used.source].label} /></div>
@@ -432,7 +479,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={7} class="py-10 text-center text-muted-foreground">
+							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
 								Nothing here.
 							</Table.Cell>
 						</Table.Row>

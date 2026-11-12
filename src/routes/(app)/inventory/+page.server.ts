@@ -16,11 +16,16 @@ import {
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 100;
-const VIEWS = ['needs', 'noweight', 'estimated', 'all'] as const;
+const VIEWS = ['needs', 'noweight', 'estimated', 'highddp', 'all'] as const;
 type View = (typeof VIEWS)[number];
 const v = schema.variants;
 
-const VIEW_WHERE: Record<View, SQL | undefined> = {
+/** Automatic DDP above 2× the goods cost (yuan items, no override) — worth checking. */
+const highDdp = (rmbFx: number, ddpPerKg: number) =>
+	sql`${v.costSource} = 'estimated' and ${v.estDdp} is null and coalesce(${v.estCurrency}, 'RMB') = 'RMB'
+		and coalesce(${v.weightG}, 0) * ${ddpPerKg} / 1000.0 > 2 * ${v.estCnPriceMinor} * ${rmbFx} / 10000.0`;
+
+const VIEW_WHERE: Record<Exclude<View, 'highddp'>, SQL | undefined> = {
 	needs: and(gt(v.shopifyOnHand, 0), eq(v.avgCost, 0)),
 	noweight: and(eq(v.status, 'ACTIVE'), sql`coalesce(${v.weightG}, 0) = 0`),
 	estimated: or(eq(v.costSource, 'estimated'), eq(v.costSource, 'shopify')),
@@ -34,7 +39,9 @@ export const load: PageServerLoad = async ({ url }) => {
 	const q = url.searchParams.get('q')?.trim() ?? '';
 	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
-	const filters = [VIEW_WHERE[view]];
+	const rates = await getRates();
+	const where_ = (k: View) => (k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
+	const filters = [where_(view)];
 	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));
 	const where = and(...filters.filter(Boolean));
 
@@ -54,6 +61,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			shopifyCostOk: v.shopifyCostOk,
 			cnPrice: v.estCnPriceMinor,
 			currency: v.estCurrency,
+			ddp: v.estDdp,
 			estCost: v.estCost,
 			avgCost: v.avgCost,
 			costSource: v.costSource
@@ -67,7 +75,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	const counts = Object.fromEntries(
 		await Promise.all(
 			VIEWS.map(async (k) => {
-				const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(VIEW_WHERE[k]);
+				const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where_(k));
 				return [k, n] as const;
 			})
 		)
@@ -106,7 +114,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		pageCount: Math.max(1, Math.ceil(n / PAGE_SIZE)),
 		totalRows: n,
 		counts,
-		rates: await getRates(),
+		rates,
 		summary: await stockSummary(),
 		openingRecorded: opening > 0,
 		rows
@@ -142,12 +150,13 @@ export const actions: Actions = {
 		let inputs: Input[];
 		try {
 			inputs = (
-				JSON.parse(raw) as { id: string; price: string; currency: string; ok: boolean }[]
+				JSON.parse(raw) as { id: string; price: string; currency: string; ok: boolean; ddp: string }[]
 			).map((r) => ({
 				id: String(r.id),
 				priceMinor: r.price.trim() === '' ? null : Math.abs(toPaisa(r.price)),
 				currency: r.currency === 'PKR' ? 'PKR' : 'RMB',
-				shopifyCostOk: !!r.ok
+				shopifyCostOk: !!r.ok,
+				ddp: (r.ddp ?? '').trim() === '' ? null : Math.abs(toPaisa(r.ddp))
 			}));
 		} catch {
 			return fail(400, { error: 'Prices must be numbers.' });
@@ -178,13 +187,14 @@ export const actions: Actions = {
 		const iPrice = col('chinaprice', 'price', 'cnprice');
 		const iCur = col('currency');
 		const iOk = col('shopifycostcorrect');
+		const iDdp = col('ddpperpiece', 'ddp');
 		if (iPrice < 0 || (iId < 0 && iSku < 0))
 			return fail(400, {
 				error: 'Sheet needs a "china_price" column and "variant_id" or "sku". Use the exported sheet.'
 			});
 
 		const all = await db
-			.select({ id: v.id, sku: v.sku, ok: v.shopifyCostOk, cur: v.estCurrency, price: v.estCnPriceMinor })
+			.select({ id: v.id, sku: v.sku, ok: v.shopifyCostOk, cur: v.estCurrency, price: v.estCnPriceMinor, ddp: v.estDdp })
 			.from(v);
 		const byId = new Map(all.map((r) => [r.id, r]));
 		const bySku = new Map(all.filter((r) => r.sku).map((r) => [r.sku!.trim().toLowerCase(), r]));
@@ -211,16 +221,28 @@ export const actions: Actions = {
 			}
 			const cur = iCur >= 0 ? String(row[iCur] ?? '').trim().toUpperCase() : '';
 			const okRaw = iOk >= 0 ? String(row[iOk] ?? '').trim().toLowerCase() : '';
+			let ddp: number | null | undefined = undefined; // column missing → leave as is
+			if (iDdp >= 0) {
+				const d = String(row[iDdp] ?? '').trim();
+				try {
+					ddp = d === '' ? null : Math.abs(toPaisa(d));
+				} catch {
+					problems.push(`row ${i + 2}: DDP "${d}" is not a number`);
+					continue;
+				}
+			}
 			const next: Input = {
 				id: match.id,
 				priceMinor,
 				currency: cur === 'PKR' || cur === 'RS' ? 'PKR' : 'RMB',
-				shopifyCostOk: okRaw ? ['yes', 'y', 'true', '1'].includes(okRaw) : match.ok
+				shopifyCostOk: okRaw ? ['yes', 'y', 'true', '1'].includes(okRaw) : match.ok,
+				ddp
 			};
 			if (
 				next.priceMinor === match.price &&
 				(next.priceMinor === null || next.currency === (match.cur ?? 'RMB')) &&
-				next.shopifyCostOk === match.ok
+				next.shopifyCostOk === match.ok &&
+				(ddp === undefined || ddp === match.ddp)
 			)
 				continue;
 			inputs.push(next);

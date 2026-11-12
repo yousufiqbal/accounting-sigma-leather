@@ -22,7 +22,7 @@ export const actions: Actions = {
 	create: async ({ request }) => {
 		const f = await request.formData();
 		const ref = String(f.get('ref') ?? '').trim();
-		if (!ref) return fail(400, { error: 'Give the shipment a name, e.g. "Nov-2026 sea".' });
+		if (!ref) return fail(400, { error: 'Give the purchase a name, e.g. "Nov-2026 sea".' });
 		const currency = f.get('currency') === 'PKR' ? 'PKR' : 'RMB';
 		let fx: number, ddp: number;
 		try {
@@ -42,6 +42,6 @@ export const actions: Actions = {
 				ddpRatePerKg: Math.abs(ddp)
 			})
 			.returning({ id: schema.importBatches.id });
-		redirect(303, `/imports/${b.id}`);
+		redirect(303, `/purchases/${b.id}`);
 	}
 };
