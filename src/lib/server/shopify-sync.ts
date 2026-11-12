@@ -6,21 +6,11 @@ import { eq, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
 import { gidId, shopifyGql } from './shopify.js';
 import { toPaisa } from '../money.js';
+import { getSetting, setSetting } from './settings.js';
+import { recomputeCosts } from './costing.js';
 
 type Money = { shopMoney: { amount: string } };
 const amt = (m: Money | null | undefined) => toPaisa(m?.shopMoney.amount ?? 0);
-
-async function getSetting<T>(key: string): Promise<T | null> {
-	const row = await db.query.settings.findFirst({ where: eq(schema.settings.key, key) });
-	return row ? (JSON.parse(row.value) as T) : null;
-}
-async function setSetting(key: string, value: unknown) {
-	const v = JSON.stringify(value);
-	await db
-		.insert(schema.settings)
-		.values({ key, value: v })
-		.onConflictDoUpdate({ target: schema.settings.key, set: { value: v } });
-}
 
 async function logRun<T>(kind: string, fn: () => Promise<T>): Promise<T> {
 	const [run] = await db
@@ -128,6 +118,7 @@ export function syncVariants() {
 			count += batch.length;
 			after = d.productVariants.pageInfo.hasNextPage ? d.productVariants.pageInfo.endCursor : null;
 		} while (after);
+		await recomputeCosts(); // weights / Shopify costs may have changed
 		return { variants: count };
 	});
 }

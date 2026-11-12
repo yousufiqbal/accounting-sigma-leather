@@ -162,7 +162,8 @@ Until a fee is known: median actual fee of last 30 parcels for same courier + we
 ## 6. Opening balance & history
 
 - Product cost estimate: `China price × FX + unit weight kg × DDP rate/kg`. Bulk grid + CSV upload. Marked `estimated`.
-- Opening qty at first sale date = current on_hand + units shipped since − units returned/received since.
+- Opening stock = Shopify on_hand at cutover (one click on Inventory). Past COGS uses the estimate (order-line snapshots marked `cost_estimated` follow the estimate until a batch lands).
+- Cost used per variant: batch avg > China-price estimate > Shopify cost ticked "correct" > none. Pakistani suppliers: PKR price as-is, no DDP. DDP is always per kg.
 - History reports badged "estimated cost" where estimates were used.
 - Past expenses: monthly totals per category are enough.
 - Historical courier data: PostEx full API pull + `dex-complete.xlsx`.
@@ -245,4 +246,3 @@ Late changes to locked months post to current month as "Prior-month adjustment".
 
 - Exact title of the 5% advance-payment discount in Shopify.
 - Is shipping charged to customers in Shopify? (→ "Shipping charged" line.)
-- DDP rate: flat Rs/kg or per shipment?

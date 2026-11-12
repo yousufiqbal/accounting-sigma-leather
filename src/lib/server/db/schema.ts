@@ -40,11 +40,16 @@ export const variants = sqliteTable(
 		weightG: integer('weight_g'),
 		price: money('price_paisa'),
 		avgCost: money('avg_cost_paisa'),
-		costSource: text('cost_source', { enum: ['none', 'estimated', 'batch'] })
+		/** none = no cost yet · estimated = China price estimate · shopify = trusted Shopify cost · batch = from a landed import */
+		costSource: text('cost_source', { enum: ['none', 'estimated', 'shopify', 'batch'] })
 			.notNull()
 			.default('none'),
 		estCnPriceMinor: integer('est_cn_price_minor'), // for opening estimate, e.g. RMB fen
-		estCurrency: text('est_currency'),
+		estCurrency: text('est_currency', { enum: ['RMB', 'PKR'] }),
+		/** Computed estimate: RMB price × FX + kg × DDP (PKR price as-is). */
+		estCost: integer('est_cost_paisa'),
+		/** Owner confirmed the Shopify "cost per item" is a correct landed cost. */
+		shopifyCostOk: integer('shopify_cost_ok', { mode: 'boolean' }).notNull().default(false),
 		shopifyCost: integer('shopify_cost_paisa'), // "cost per item" currently set in Shopify
 		shopifyOnHand: integer('shopify_on_hand'),
 		shopifySyncedAt: text('shopify_synced_at'),

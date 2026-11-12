@@ -1,0 +1,277 @@
+/**
+ * Stock ledger + import batches (SPEC.md §3 "Imports", §5).
+ *
+ * Landed unit cost = unit price × FX (PKR: as-is)
+ *                  + unit kg × DDP rate/kg
+ *                  + share of extra batch costs (by goods value).
+ * Landing a batch:
+ *   1. reads live Shopify on-hand,
+ *   2. freezes cost snapshots of everything sold so far at the old cost,
+ *   3. new avg = (on_hand × old + qty × landed) / (on_hand + qty),
+ *   4. pushes +qty (reason "received", idempotent per batch) and new cost to Shopify,
+ *   5. writes receipt movements + cost history and marks the batch landed.
+ */
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { db, schema } from './db/index.js';
+import { gidId, shopifyGql } from './shopify.js';
+import { ddpCost, goodsCost } from './costing.js';
+
+const v = schema.variants;
+
+// ─── Opening stock ─────────────────────────────────────────────────────────────
+
+/** One-time: Shopify on-hand today becomes the opening stock (cutover). */
+export async function recordOpeningStock() {
+	const [{ n }] = await db
+		.select({ n: sql<number>`count(*)` })
+		.from(schema.stockMovements)
+		.where(eq(schema.stockMovements.type, 'opening'));
+	if (n > 0) throw new Error('Opening stock is already recorded.');
+	const rows = await db
+		.select({ id: v.id, onHand: v.shopifyOnHand, avgCost: v.avgCost })
+		.from(v)
+		.where(sql`${v.shopifyOnHand} > 0`);
+	const at = new Date().toISOString();
+	const stmts = rows.map((r) =>
+		db.insert(schema.stockMovements).values({
+			variantId: r.id,
+			at,
+			qtyDelta: r.onHand!,
+			type: 'opening',
+			unitCost: r.avgCost,
+			reason: 'Shopify on-hand at cutover'
+		})
+	);
+	for (let i = 0; i < stmts.length; i += 100) {
+		const chunk = stmts.slice(i, i + 100);
+		await db.batch(chunk as [(typeof chunk)[0], ...typeof chunk]);
+	}
+	return { variants: rows.length, units: rows.reduce((s, r) => s + (r.onHand ?? 0), 0) };
+}
+
+// ─── Batch maths ───────────────────────────────────────────────────────────────
+
+type Batch = typeof schema.importBatches.$inferSelect;
+type Item = typeof schema.batchItems.$inferSelect;
+type Cost = typeof schema.batchCosts.$inferSelect;
+
+export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
+	const fx = batch.currency === 'PKR' ? 10_000 : batch.fxRateX10000;
+	const lines = items.map((it) => {
+		const goods = goodsCost(it.unitPriceForeignMinor, batch.currency, fx);
+		const ddp = ddpCost(it.unitWeightG, batch.ddpRatePerKg);
+		return { ...it, goods, ddp };
+	});
+	const goodsTotal = lines.reduce((s, l) => s + l.goods * l.qty, 0);
+	const extraTotal = costs.reduce((s, c) => s + c.amount, 0);
+	const out = lines.map((l) => {
+		const extra =
+			goodsTotal > 0 ? Math.round((extraTotal * l.goods) / goodsTotal) : 0; // per unit, by value
+		return { ...l, extra, landed: l.goods + l.ddp + extra };
+	});
+	return {
+		lines: out,
+		totals: {
+			units: out.reduce((s, l) => s + l.qty, 0),
+			goods: goodsTotal,
+			ddp: out.reduce((s, l) => s + l.ddp * l.qty, 0),
+			extra: extraTotal,
+			landed: out.reduce((s, l) => s + l.landed * l.qty, 0),
+			weightG: out.reduce((s, l) => s + l.unitWeightG * l.qty, 0)
+		}
+	};
+}
+
+export async function loadBatch(id: string) {
+	const batch = await db.query.importBatches.findFirst({ where: eq(schema.importBatches.id, id) });
+	if (!batch) return null;
+	const items = await db.select().from(schema.batchItems).where(eq(schema.batchItems.batchId, id));
+	const costs = await db.select().from(schema.batchCosts).where(eq(schema.batchCosts.batchId, id));
+	return { batch, items, costs, ...priceBatch(batch, items, costs) };
+}
+
+// ─── Shopify helpers ───────────────────────────────────────────────────────────
+
+async function primaryLocation() {
+	const d = await shopifyGql<{ locations: { nodes: { id: string; isActive: boolean }[] } }>(
+		`{ locations(first: 10) { nodes { id isActive } } }`
+	);
+	const loc = d.locations.nodes.find((l) => l.isActive);
+	if (!loc) throw new Error('No active Shopify location.');
+	return loc.id;
+}
+
+async function liveOnHand(inventoryItemIds: string[], locationId: string) {
+	const out = new Map<string, number>();
+	for (let i = 0; i < inventoryItemIds.length; i += 100) {
+		const ids = inventoryItemIds.slice(i, i + 100).map((x) => `gid://shopify/InventoryItem/${x}`);
+		const d = await shopifyGql<{
+			nodes: ({ id: string; inventoryLevel: { quantities: { quantity: number }[] } | null } | null)[];
+		}>(
+			`query($ids: [ID!]!, $loc: ID!) { nodes(ids: $ids) { ... on InventoryItem {
+				id inventoryLevel(locationId: $loc) { quantities(names: ["on_hand"]) { quantity } }
+			} } }`,
+			{ ids, loc: locationId }
+		);
+		for (const n of d.nodes)
+			if (n) out.set(gidId(n.id), n.inventoryLevel?.quantities[0]?.quantity ?? 0);
+	}
+	return out;
+}
+
+async function pushReceipt(
+	batchId: string,
+	ref: string,
+	changes: { inventoryItemId: string; delta: number }[],
+	locationId: string
+) {
+	for (let i = 0; i < changes.length; i += 100) {
+		const d = await shopifyGql<{
+			inventoryAdjustQuantities: { userErrors: { field: string[]; message: string }[] };
+		}>(
+			`mutation($input: InventoryAdjustQuantitiesInput!, $key: String!) {
+				inventoryAdjustQuantities(input: $input) @idempotent(key: $key) { userErrors { field message } }
+			}`,
+			{
+				key: `sl-batch-${batchId}-${i / 100}`,
+				input: {
+					name: 'available',
+					reason: 'received',
+					referenceDocumentUri: `sigma-accounting://import-batch/${encodeURIComponent(ref)}`,
+					changes: changes.slice(i, i + 100).map((c) => ({
+						inventoryItemId: `gid://shopify/InventoryItem/${c.inventoryItemId}`,
+						locationId,
+						delta: c.delta,
+						changeFromQuantity: null
+					}))
+				}
+			}
+		);
+		const errs = d.inventoryAdjustQuantities.userErrors;
+		if (errs.length) throw new Error(`Shopify stock update: ${errs.map((e) => e.message).join('; ')}`);
+	}
+}
+
+/** Set Shopify "cost per item" for many inventory items (25 per request, aliased). */
+export async function pushCosts(items: { inventoryItemId: string; cost: number }[]) {
+	const failed: string[] = [];
+	for (let i = 0; i < items.length; i += 25) {
+		const chunk = items.slice(i, i + 25);
+		const body = chunk
+			.map(
+				(c, j) =>
+					`m${j}: inventoryItemUpdate(id: "gid://shopify/InventoryItem/${c.inventoryItemId}", input: { cost: "${(c.cost / 100).toFixed(2)}" }) { userErrors { message } }`
+			)
+			.join('\n');
+		const d = await shopifyGql<Record<string, { userErrors: { message: string }[] }>>(
+			`mutation { ${body} }`
+		);
+		chunk.forEach((c, j) => {
+			if (d[`m${j}`]?.userErrors.length) failed.push(c.inventoryItemId);
+		});
+	}
+	return failed;
+}
+
+// ─── Land ──────────────────────────────────────────────────────────────────────
+
+export async function landBatch(id: string, landedOn: string) {
+	const b = await loadBatch(id);
+	if (!b) throw new Error('Batch not found.');
+	if (b.batch.status === 'landed') throw new Error('Already landed.');
+	if (!b.lines.length) throw new Error('Add items first.');
+	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000) throw new Error('Enter the exchange rate.');
+	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
+
+	const vars = await db
+		.select()
+		.from(v)
+		.where(inArray(v.id, b.lines.map((l) => l.variantId)));
+	const byId = new Map(vars.map((x) => [x.id, x]));
+	const missing = b.lines.filter((l) => !byId.get(l.variantId)?.inventoryItemId);
+	if (missing.length) throw new Error(`${missing.length} items are not linked to Shopify — run a product sync.`);
+
+	const locationId = await primaryLocation();
+	const onHand = await liveOnHand(
+		vars.map((x) => x.inventoryItemId!),
+		locationId
+	);
+
+	const at = new Date(`${landedOn}T12:00:00+05:00`).toISOString();
+	const plan = b.lines.map((l) => {
+		const x = byId.get(l.variantId)!;
+		const have = Math.max(0, onHand.get(x.inventoryItemId!) ?? 0);
+		// Unknown old cost → treat existing units as costing the same as this batch.
+		const old = x.avgCost > 0 ? x.avgCost : l.landed;
+		const newAvg = Math.round((have * old + l.qty * l.landed) / (have + l.qty));
+		return { line: l, variant: x, have, newAvg };
+	});
+
+	// 1. Shopify first (idempotent key per batch → safe to retry if a later step fails).
+	await pushReceipt(
+		id,
+		b.batch.ref,
+		plan.map((p) => ({ inventoryItemId: p.variant.inventoryItemId!, delta: p.line.qty })),
+		locationId
+	);
+	const costFailed = await pushCosts(
+		plan.map((p) => ({ inventoryItemId: p.variant.inventoryItemId!, cost: p.newAvg }))
+	);
+
+	// 2. Local ledger.
+	const now = new Date().toISOString();
+	const stmts = [];
+	for (const p of plan) {
+		const x = p.variant;
+		// Everything sold before this receipt keeps the old cost.
+		stmts.push(
+			db
+				.update(schema.orderLines)
+				.set({ costSnapshot: x.avgCost || null, costEstimated: x.costSource !== 'batch' })
+				.where(and(eq(schema.orderLines.variantId, x.id), isNull(schema.orderLines.costSnapshot)))
+		);
+		stmts.push(
+			db.insert(schema.stockMovements).values({
+				variantId: x.id,
+				at,
+				qtyDelta: p.line.qty,
+				type: 'receipt',
+				unitCost: p.line.landed,
+				reason: `Import ${b.batch.ref}`,
+				refType: 'batch',
+				refId: id
+			}),
+			db.insert(schema.costHistory).values({
+				variantId: x.id,
+				at,
+				oldCost: x.avgCost,
+				newCost: p.newAvg,
+				reason: 'batch',
+				refId: id
+			}),
+			db
+				.update(v)
+				.set({
+					avgCost: p.newAvg,
+					costSource: 'batch',
+					shopifyCost: costFailed.includes(x.inventoryItemId!) ? x.shopifyCost : p.newAvg,
+					shopifyOnHand: p.have + p.line.qty,
+					updatedAt: now
+				})
+				.where(eq(v.id, x.id)),
+			db
+				.update(schema.batchItems)
+				.set({ landedUnitCost: p.line.landed })
+				.where(eq(schema.batchItems.id, p.line.id))
+		);
+	}
+	stmts.push(
+		db
+			.update(schema.importBatches)
+			.set({ status: 'landed', landedOn })
+			.where(eq(schema.importBatches.id, id))
+	);
+	// One batch = one transaction: the ledger is never half-written.
+	await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
+	return { items: plan.length, units: b.totals.units, costFailed: costFailed.length };
+}

@@ -1,0 +1,228 @@
+import { fail } from '@sveltejs/kit';
+import { and, asc, desc, eq, gt, like, or, sql, type SQL } from 'drizzle-orm';
+import { db, schema } from '#lib/server/db/index.js';
+import { toPaisa } from '#lib/money.js';
+import { getRates, saveCostInputs, setRates, stockSummary } from '#lib/server/costing.js';
+import { parseCsv, parseXlsx } from '#lib/server/couriers/sheets.js';
+import { headerKey } from '#lib/server/couriers/util.js';
+import { syncVariants } from '#lib/server/shopify-sync.js';
+import { recordOpeningStock } from '#lib/server/stock.js';
+import type { Actions, PageServerLoad } from './$types';
+
+const PAGE_SIZE = 100;
+const VIEWS = ['needs', 'noweight', 'estimated', 'all'] as const;
+type View = (typeof VIEWS)[number];
+const v = schema.variants;
+
+const VIEW_WHERE: Record<View, SQL | undefined> = {
+	needs: and(gt(v.shopifyOnHand, 0), eq(v.avgCost, 0)),
+	noweight: and(eq(v.status, 'ACTIVE'), sql`coalesce(${v.weightG}, 0) = 0`),
+	estimated: or(eq(v.costSource, 'estimated'), eq(v.costSource, 'shopify')),
+	all: undefined
+};
+
+export const load: PageServerLoad = async ({ url }) => {
+	const view: View = (VIEWS as readonly string[]).includes(url.searchParams.get('view') ?? '')
+		? (url.searchParams.get('view') as View)
+		: 'needs';
+	const q = url.searchParams.get('q')?.trim() ?? '';
+	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+
+	const filters = [VIEW_WHERE[view]];
+	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));
+	const where = and(...filters.filter(Boolean));
+
+	const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where);
+	const rows = await db
+		.select({
+			id: v.id,
+			productId: v.productId,
+			productTitle: v.productTitle,
+			variantTitle: v.variantTitle,
+			sku: v.sku,
+			status: v.status,
+			weightG: v.weightG,
+			price: v.price,
+			onHand: v.shopifyOnHand,
+			shopifyCost: v.shopifyCost,
+			shopifyCostOk: v.shopifyCostOk,
+			cnPrice: v.estCnPriceMinor,
+			currency: v.estCurrency,
+			estCost: v.estCost,
+			avgCost: v.avgCost,
+			costSource: v.costSource
+		})
+		.from(v)
+		.where(where)
+		.orderBy(desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`), asc(v.productTitle), asc(v.variantTitle))
+		.limit(PAGE_SIZE)
+		.offset((page - 1) * PAGE_SIZE);
+
+	const counts = Object.fromEntries(
+		await Promise.all(
+			VIEWS.map(async (k) => {
+				const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(VIEW_WHERE[k]);
+				return [k, n] as const;
+			})
+		)
+	) as Record<View, number>;
+
+	const [{ opening }] = await db
+		.select({ opening: sql<number>`count(*)` })
+		.from(schema.stockMovements)
+		.where(eq(schema.stockMovements.type, 'opening'));
+
+	return {
+		view,
+		q,
+		page,
+		pageCount: Math.max(1, Math.ceil(n / PAGE_SIZE)),
+		totalRows: n,
+		counts,
+		rates: await getRates(),
+		summary: await stockSummary(),
+		openingRecorded: opening > 0,
+		rows
+	};
+};
+
+/** "39.5" → 395000 (×10⁴). */
+function toX10000(s: string) {
+	const n = Number(s.replace(/[,\s]/g, ''));
+	if (!Number.isFinite(n) || n < 0) throw new Error('bad number');
+	return Math.round(n * 10_000);
+}
+
+type Input = Parameters<typeof saveCostInputs>[0][number];
+
+export const actions: Actions = {
+	rates: async ({ request }) => {
+		const f = await request.formData();
+		try {
+			const ddpPerKg = toPaisa(String(f.get('ddp') ?? ''));
+			const rmbFx = toX10000(String(f.get('fx') ?? ''));
+			if (ddpPerKg <= 0 || rmbFx <= 0) return fail(400, { error: 'Enter both rates.' });
+			const r = await setRates({ ddpPerKg, rmbFx });
+			return { saved: `Rates saved · ${r.changed} product costs updated.` };
+		} catch {
+			return fail(400, { error: 'Rates must be numbers.' });
+		}
+	},
+
+	/** Grid save: JSON list of changed rows. */
+	save: async ({ request }) => {
+		const raw = String((await request.formData()).get('rows') ?? '[]');
+		let inputs: Input[];
+		try {
+			inputs = (
+				JSON.parse(raw) as { id: string; price: string; currency: string; ok: boolean }[]
+			).map((r) => ({
+				id: String(r.id),
+				priceMinor: r.price.trim() === '' ? null : Math.abs(toPaisa(r.price)),
+				currency: r.currency === 'PKR' ? 'PKR' : 'RMB',
+				shopifyCostOk: !!r.ok
+			}));
+		} catch {
+			return fail(400, { error: 'Prices must be numbers.' });
+		}
+		if (!inputs.length) return { saved: 'Nothing changed.' };
+		const r = await saveCostInputs(inputs);
+		return { saved: `Saved ${inputs.length} variants · ${r.changed} costs updated.` };
+	},
+
+	/** Bulk prices from the exported sheet (CSV or xlsx). Matches variant_id, else SKU. */
+	upload: async ({ request }) => {
+		const file = (await request.formData()).get('file');
+		if (!(file instanceof File) || !file.size) return fail(400, { error: 'Choose a file.' });
+		if (file.size > 5_000_000) return fail(400, { error: 'File too large (max 5 MB).' });
+		const bytes = new Uint8Array(await file.arrayBuffer());
+		let grid: string[][];
+		try {
+			grid = /\.xlsx$/i.test(file.name)
+				? parseXlsx(bytes)
+				: parseCsv(new TextDecoder().decode(bytes));
+		} catch (e) {
+			return fail(400, { error: `Could not read file: ${e instanceof Error ? e.message : e}` });
+		}
+		const head = (grid[0] ?? []).map(headerKey);
+		const col = (...names: string[]) => head.findIndex((h) => names.includes(h));
+		const iId = col('variantid', 'id');
+		const iSku = col('sku');
+		const iPrice = col('chinaprice', 'price', 'cnprice');
+		const iCur = col('currency');
+		const iOk = col('shopifycostcorrect');
+		if (iPrice < 0 || (iId < 0 && iSku < 0))
+			return fail(400, {
+				error: 'Sheet needs a "china_price" column and "variant_id" or "sku". Use the exported sheet.'
+			});
+
+		const all = await db
+			.select({ id: v.id, sku: v.sku, ok: v.shopifyCostOk, cur: v.estCurrency, price: v.estCnPriceMinor })
+			.from(v);
+		const byId = new Map(all.map((r) => [r.id, r]));
+		const bySku = new Map(all.filter((r) => r.sku).map((r) => [r.sku!.trim().toLowerCase(), r]));
+
+		const inputs: Input[] = [];
+		const problems: string[] = [];
+		for (const [i, row] of grid.slice(1).entries()) {
+			if (row.every((c) => !String(c ?? '').trim())) continue;
+			const key = iId >= 0 && row[iId]?.trim() ? row[iId].trim() : '';
+			const match =
+				(key && byId.get(key)) ||
+				(iSku >= 0 && row[iSku]?.trim() ? bySku.get(row[iSku].trim().toLowerCase()) : undefined);
+			if (!match) {
+				problems.push(`row ${i + 2}: product not found`);
+				continue;
+			}
+			const p = String(row[iPrice] ?? '').trim();
+			let priceMinor: number | null;
+			try {
+				priceMinor = p === '' ? null : Math.abs(toPaisa(p));
+			} catch {
+				problems.push(`row ${i + 2}: price "${p}" is not a number`);
+				continue;
+			}
+			const cur = iCur >= 0 ? String(row[iCur] ?? '').trim().toUpperCase() : '';
+			const okRaw = iOk >= 0 ? String(row[iOk] ?? '').trim().toLowerCase() : '';
+			const next: Input = {
+				id: match.id,
+				priceMinor,
+				currency: cur === 'PKR' || cur === 'RS' ? 'PKR' : 'RMB',
+				shopifyCostOk: okRaw ? ['yes', 'y', 'true', '1'].includes(okRaw) : match.ok
+			};
+			if (
+				next.priceMinor === match.price &&
+				(next.priceMinor === null || next.currency === (match.cur ?? 'RMB')) &&
+				next.shopifyCostOk === match.ok
+			)
+				continue;
+			inputs.push(next);
+		}
+		if (problems.length > 20)
+			return fail(400, { error: `${problems.length} rows have problems, e.g. ${problems.slice(0, 5).join('; ')}` });
+		const r = inputs.length ? await saveCostInputs(inputs) : { changed: 0 };
+		return {
+			saved:
+				`Sheet imported: ${inputs.length} variants changed · ${r.changed} costs updated.` +
+				(problems.length ? ` Skipped: ${problems.join('; ')}` : '')
+		};
+	},
+
+	refresh: async () => {
+		try {
+			const r = await syncVariants();
+			return { saved: `Pulled ${r.variants} variants from Shopify (weights, stock, costs).` };
+		} catch (e) {
+			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
+		}
+	},
+
+	opening: async () => {
+		try {
+			const r = await recordOpeningStock();
+			return { saved: `Stock ledger started: ${r.variants} variants · ${r.units} units on hand.` };
+		} catch (e) {
+			return fail(400, { error: e instanceof Error ? e.message : String(e) });
+		}
+	}
+};
