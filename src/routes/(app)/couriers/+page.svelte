@@ -158,49 +158,6 @@
 		</div>
 	</div>
 
-	{#if form?.error}
-		<div
-			class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger"
-			role="alert"
-		>
-			<TriangleAlert class="mt-0.5 size-4 shrink-0" />
-			{form.error}
-		</div>
-	{/if}
-	{#if page.url.searchParams.get('imported') && !form}
-		{@const [n, u, same, c] = page.url.searchParams.get('imported')!.split('-')}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			File imported: {n} new · {u} updated · {same} already up to date{Number(c)
-				? ` · ${c} conflicts (see Needs attention)`
-				: ''}
-		</div>
-	{/if}
-	{#if form && 'saved' in form && form.saved}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			{form.saved}
-		</div>
-	{/if}
-	{#if form?.synced}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			PostEx sync done: {form.synced.fetched} parcels checked · {form.synced.new} new · {form.synced
-				.updated} updated ·
-			{form.synced.unchanged} unchanged{form.synced.conflict
-				? ` · ${form.synced.conflict} conflicts`
-				: ''} ·
-			{form.synced.cprLinked} linked to payments{form.synced.cprPending
-				? ` (${form.synced.cprPending} still waiting — sync again to continue)`
-				: ''}
-		</div>
-	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 		<Stat label="Delivered ({monthLabel(data.month)})">{totals.delivered}</Stat>

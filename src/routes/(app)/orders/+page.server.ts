@@ -123,10 +123,14 @@ export const actions: Actions = {
 		try {
 			if (mode === 'full') {
 				const r = await syncStock('full');
-				return { synced: { ...r, variants: r.variants } };
+				return {
+					saved: `Shopify synced: ${r.orders} orders · ${r.variants} products · ${r.parcelsLinked} parcels linked${r.assumedDelivered ? ` · ${r.assumedDelivered} untracked orders counted as delivered` : ''}${r.stockChanges ? ` · ${r.stockChanges} stock changes to review` : ''}`
+				};
 			}
 			const orders = await syncOrders(mode);
-			return { synced: { ...orders, variants: null } };
+			return {
+				saved: `Shopify synced: ${orders.orders} orders · ${orders.parcelsLinked} parcels linked${orders.assumedDelivered ? ` · ${orders.assumedDelivered} untracked orders counted as delivered` : ''}`
+			};
 		} catch (e) {
 			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
 		}

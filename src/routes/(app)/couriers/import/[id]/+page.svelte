@@ -75,14 +75,6 @@
 		</div>
 	</div>
 
-	{#if form?.error}
-		<div
-			class="rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger"
-			role="alert"
-		>
-			{form.error}
-		</div>
-	{/if}
 
 	{#if data.errors.length}
 		<div

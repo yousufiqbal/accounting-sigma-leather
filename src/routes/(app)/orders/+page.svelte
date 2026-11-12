@@ -95,35 +95,6 @@
 		</form>
 	</div>
 
-	{#if form && 'error' in form && form.error}
-		<div
-			class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger"
-			role="alert"
-		>
-			<TriangleAlert class="mt-0.5 size-4 shrink-0" />{form.error}
-		</div>
-	{/if}
-	{#if form && 'synced' in form && form.synced}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			Shopify sync done: {form.synced.orders} orders{form.synced.variants !== null
-				? ` · ${form.synced.variants} product variants`
-				: ''} ·
-			{form.synced.parcelsLinked} parcels linked to orders{form.synced.parcelsExcluded
-				? ` · ${form.synced.parcelsExcluded} pre-Shopify parcels excluded`
-				: ''}
-		</div>
-	{/if}
-	{#if form && 'saved' in form && form.saved}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			{form.saved}
-		</div>
-	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 		<Stat label="Orders placed ({monthLabel(data.month)})">{data.summary.orders ?? 0}</Stat>

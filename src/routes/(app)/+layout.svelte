@@ -12,12 +12,37 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import ConfirmDialog from '#lib/components/app/confirm-dialog.svelte';
 	import Lightbox from '#lib/components/app/lightbox.svelte';
+	import { toast } from 'svelte-sonner';
+	import { replaceState } from '$app/navigation';
 	import { nav, settingsNav } from '#lib/nav.js';
 	import { currentMonth, monthLabel, shiftMonth } from '#lib/month.js';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 	let logoutForm = $state<HTMLFormElement>();
+
+	/** Panel-wide toasts: every form action answers with { saved } or { error }. */
+	let lastForm: unknown = null;
+	$effect(() => {
+		const f = page.form as { saved?: unknown; error?: unknown } | null;
+		if (!f || f === lastForm) return;
+		lastForm = f;
+		if (typeof f.error === 'string' && f.error) toast.error(f.error);
+		else if (typeof f.saved === 'string' && f.saved) toast.success(f.saved);
+	});
+
+	/** Courier file import redirects with ?imported=new-updated-same-conflicts. */
+	$effect(() => {
+		const imp = page.url.searchParams.get('imported');
+		if (!imp) return;
+		const [n, u, same, c] = imp.split('-').map(Number);
+		toast.success(
+			`File imported: ${n} new · ${u} updated · ${same} already up to date${c ? ` · ${c} conflicts (see Needs attention)` : ''}`
+		);
+		const url = new URL(page.url.href);
+		url.searchParams.delete('imported');
+		replaceState(url, page.state);
+	});
 
 	/** Same path, different month — keeps the month picker global. */
 	function monthHref(delta: number) {

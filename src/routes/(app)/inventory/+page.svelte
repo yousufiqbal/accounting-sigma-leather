@@ -189,22 +189,6 @@
 		</div>
 	</div>
 
-	{#if form && 'error' in form && form.error}
-		<div
-			class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger"
-			role="alert"
-		>
-			<TriangleAlert class="mt-0.5 size-4 shrink-0" />{form.error}
-		</div>
-	{/if}
-	{#if form && 'saved' in form && form.saved}
-		<div
-			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
-			role="status"
-		>
-			{form.saved}
-		</div>
-	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 		<Stat label="Total stock value (at cost)" hint="Warehouse + couriers + on the way">

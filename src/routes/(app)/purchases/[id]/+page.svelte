@@ -6,6 +6,7 @@
 	import { enhance } from '$app/forms';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -35,6 +36,18 @@
 	let busy = $state<string | null>(null);
 	let showPaste = $state(false);
 	let pickedVariant = $state('');
+
+	/** Shipment DDP inputs: saved values unless the user is editing. */
+	const shipSaved = $derived({
+		kg: data.shipment.billedWeightG !== null ? String(data.shipment.billedWeightG / 1000) : '',
+		rate: String(b.ddpRatePerKg / 100)
+	});
+	let shipEdit = $state<{ kg: string; rate: string } | null>(null);
+	const ship = $derived(shipEdit ?? shipSaved);
+	const num = (x: string) => (x.trim() === '' ? null : Number(x.replace(/,/g, '')));
+	const shipDirty = $derived(
+		shipEdit !== null && (num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate))
+	);
 	const dirty = $derived(Object.keys(edits).length);
 
 	const original = (l: Line): Edit => ({
@@ -135,16 +148,6 @@
 		{/if}
 	</div>
 
-	{#if form && 'error' in form && form.error}
-		<div class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger" role="alert">
-			<TriangleAlert class="mt-0.5 size-4 shrink-0" />{form.error}
-		</div>
-	{/if}
-	{#if form && 'saved' in form && form.saved}
-		<div class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success" role="status">
-			{form.saved}
-		</div>
-	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-5">
 		<Stat label="Units">{data.totals.units.toLocaleString('en-PK')}</Stat>
@@ -279,7 +282,20 @@
 								<div class="flex items-center justify-end gap-1">
 									<Money paisa={l.landed * l.qty} />
 									{#if !locked}
-										<form method="POST" action={formAction('remove')} use:enhance={act('remove')}>
+										<form
+											method="POST"
+											action={formAction('remove')}
+											use:enhance={async (input) => {
+												const ok = await ask({
+													title: 'Remove this item?',
+													description: `${l.variant?.productTitle ?? 'Item'}${l.variant?.variantTitle ? ` — ${l.variant.variantTitle}` : ''} · ${l.qty} pcs`,
+													confirmLabel: 'Remove',
+													destructive: true
+												});
+												if (!ok) return input.cancel();
+												return act('remove')();
+											}}
+										>
 											<input type="hidden" name="itemId" value={l.id} />
 											<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
 										</form>
@@ -307,17 +323,44 @@
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
-				<form method="POST" action={formAction('shipment')} use:enhance={act('shipment')} class="flex flex-wrap items-end gap-3">
+				<form method="POST" action={formAction('shipment')} use:enhance={act('shipment', () => (shipEdit = null))} class="flex flex-wrap items-end gap-3">
 					<fieldset disabled={locked} class="contents">
 						<div class="grid gap-1.5">
 							<Label for="billedKg">Billed box weight (kg)</Label>
-							<Input id="billedKg" name="billedKg" inputmode="decimal" class="w-36" value={data.shipment.billedWeightG !== null ? data.shipment.billedWeightG / 1000 : ''} placeholder="e.g. 48.5" />
+							<Input
+								id="billedKg"
+								name="billedKg"
+								inputmode="decimal"
+								class="w-36"
+								value={ship.kg}
+								oninput={(ev) => (shipEdit = { ...ship, kg: ev.currentTarget.value })}
+								placeholder="e.g. 48.5"
+							/>
 						</div>
 						<div class="grid gap-1.5">
 							<Label for="ddp">DDP Rs per kg</Label>
-							<Input id="ddp" name="ddp" inputmode="decimal" class="w-32" value={b.ddpRatePerKg / 100} />
+							<Input
+								id="ddp"
+								name="ddp"
+								inputmode="decimal"
+								class="w-32"
+								value={ship.rate}
+								oninput={(ev) => (shipEdit = { ...ship, rate: ev.currentTarget.value })}
+							/>
 						</div>
-						{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>{busy === 'shipment' ? 'Saving…' : 'Save'}</Button>{/if}
+						{#if !locked}
+							{#if shipDirty}
+								<div class="flex items-center gap-2">
+									<Button type="submit" disabled={!!busy}>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button>
+									<Button type="button" variant="ghost" size="sm" onclick={() => (shipEdit = null)}>Undo</Button>
+									<span class="text-xs text-warning">Not applied yet</span>
+								</div>
+							{:else if data.shipment.ddpPending}
+								<span class="flex h-9 items-center"><StatusBadge tone="warning" label="DDP pending — enter box weight" /></span>
+							{:else}
+								<span class="flex h-9 items-center gap-1.5 text-sm text-success"><CircleCheck class="size-4" /> Applied to items</span>
+							{/if}
+						{/if}
 					</fieldset>
 				</form>
 				<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
@@ -358,7 +401,15 @@
 						<span class="flex items-center gap-1">
 							<Money paisa={c.amount} />
 							{#if !locked}
-								<form method="POST" action={formAction('removeCost')} use:enhance={act('removeCost')}>
+								<form
+										method="POST"
+										action={formAction('removeCost')}
+										use:enhance={async (input) => {
+											const ok = await ask({ title: 'Remove this cost?', description: `${c.type === 'local_cartage' ? 'Local cartage' : 'Other'}${c.note ? ` · ${c.note}` : ''} · ${formatRs(c.amount)}`, confirmLabel: 'Remove', destructive: true });
+											if (!ok) return input.cancel();
+											return act('removeCost')();
+										}}
+									>
 									<input type="hidden" name="costId" value={c.id} />
 									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
 								</form>

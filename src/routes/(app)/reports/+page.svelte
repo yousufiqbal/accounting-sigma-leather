@@ -74,9 +74,6 @@
 		</form>
 	</div>
 
-	{#if form?.saved}
-		<div class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success" role="status">{form.saved}</div>
-	{/if}
 
 	{#if p.status === 'provisional'}
 		<div class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning">

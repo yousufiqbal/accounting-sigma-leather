@@ -98,11 +98,6 @@
 			<Sheet.Description>Rates can be changed later until it arrives.</Sheet.Description>
 		</Sheet.Header>
 		<form method="POST" action={formAction('create')} use:enhance class="grid gap-4 px-4">
-			{#if form?.error}
-				<div class="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger-soft p-3 text-sm text-danger" role="alert">
-					<TriangleAlert class="mt-0.5 size-4 shrink-0" />{form.error}
-				</div>
-			{/if}
 			<div class="grid gap-2">
 				<Label for="ref">Name</Label>
 				<Input id="ref" name="ref" placeholder="e.g. Nov-2026 batch 1" required />
