@@ -223,7 +223,7 @@
 				</form>
 			</div>
 			<Card.Description>
-				China price per piece (¥ or Rs). Weight is saved to Shopify too. DDP / pc = weight × DDP rate unless you type one —
+				Buying price per piece (¥ from China, Rs from Pakistan). Weight is saved to Shopify too. DDP / pc = weight × DDP rate unless you type one —
 				“Local” = 0 for items bought in Pakistan; amber = DDP above 2× the goods cost.
 			</Card.Description>
 		</Card.Header>
@@ -234,7 +234,7 @@
 						<Table.Head class="pl-6">Product</Table.Head>
 						<Table.Head class="text-right">On hand</Table.Head>
 						<Table.Head>Weight (g)</Table.Head>
-						<Table.Head>China price</Table.Head>
+						<Table.Head>Buying price</Table.Head>
 						<Table.Head>DDP / pc</Table.Head>
 						<Table.Head class="text-right">Cost</Table.Head>
 						<Table.Head class="pr-6 text-right">Stock value</Table.Head>
@@ -277,7 +277,7 @@
 										oninput={(ev) => set(r, { price: ev.currentTarget.value })}
 										inputmode="decimal"
 										class="h-8 w-24 text-right"
-										aria-label="China price for {r.productTitle} {r.variantTitle ?? ''}"
+										aria-label="Buying price for {r.productTitle} {r.variantTitle ?? ''}"
 									/>
 									<select
 										class="h-8 rounded-md border bg-background px-1.5 text-sm"

@@ -205,14 +205,14 @@ export const actions: Actions = {
 		const col = (...names: string[]) => head.findIndex((h) => names.includes(h));
 		const iId = col('variantid', 'id');
 		const iSku = col('sku');
-		const iPrice = col('chinaprice', 'price', 'cnprice');
+		const iPrice = col('buyingprice', 'chinaprice', 'price', 'cnprice');
 		const iCur = col('currency');
 		const iOk = col('shopifycostcorrect');
 		const iDdp = col('ddpperpiece', 'ddp');
 		const iW = col('weightg', 'weight');
 		if ((iPrice < 0 && iW < 0) || (iId < 0 && iSku < 0))
 			return fail(400, {
-				error: 'Sheet needs "china_price" and/or "weight_g", plus "variant_id" or "sku". Use the downloaded sheet.'
+				error: 'Sheet needs "buying_price" and/or "weight_g", plus "variant_id" or "sku". Use the downloaded sheet.'
 			});
 
 		const all = await db

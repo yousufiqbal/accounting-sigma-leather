@@ -9,7 +9,7 @@ const cell = (x: unknown) => {
 };
 const rs = (paisa: number | null) => (paisa === null ? '' : (paisa / 100).toFixed(2));
 
-/** Sheet for bulk-filling China prices. Re-upload it on the Inventory page. */
+/** Sheet for bulk-filling buying prices and weights. Re-upload it on Opening costs. */
 export const GET: RequestHandler = async () => {
 	const rows = await db
 		.select()
@@ -26,7 +26,7 @@ export const GET: RequestHandler = async () => {
 		'weight_g',
 		'shopify_cost',
 		'shopify_cost_correct',
-		'china_price',
+		'buying_price',
 		'currency',
 		'ddp_per_piece',
 		'cost_used'

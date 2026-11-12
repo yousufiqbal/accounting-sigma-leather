@@ -3,13 +3,13 @@
  *
  * Every variant has one "cost used" (`avg_cost_paisa`) and where it came from (`cost_source`):
  *   batch      – weighted average from landed import batches (never touched by estimates)
- *   estimated  – China price × yuan rate + kg × DDP rate/kg (PKR price: used as-is, no DDP)
+ *   estimated  – buying price × yuan rate + kg × DDP rate/kg (PKR price: used as-is, no DDP)
  *   shopify    – owner ticked "Shopify cost is correct"
  *   none       – nothing known yet
  * Estimate wins over a trusted Shopify cost when both exist (owner typed it on purpose).
  *
  * Order lines sold before the first batch keep `cost_estimated = true` snapshots that follow
- * the estimate, so fixing a China price later also fixes past months' COGS.
+ * the estimate, so fixing a buying price later also fixes past months' COGS.
  */
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
@@ -139,7 +139,7 @@ export async function recomputeCosts(ids?: string[]) {
 	return { changed };
 }
 
-/** Save China prices / currency / "Shopify cost is correct" for many variants at once. */
+/** Save buying prices / currency / "Shopify cost is correct" for many variants at once. */
 export async function saveCostInputs(
 	inputs: {
 		id: string;

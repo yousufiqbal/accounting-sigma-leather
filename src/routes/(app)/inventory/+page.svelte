@@ -430,7 +430,7 @@
 				{:else if d.source === 'shopify'}
 					<p class="text-muted-foreground">Using the Shopify “cost per item” ({formatRs(d.shopifyCost ?? 0)}), marked as correct.</p>
 				{:else if d.source === 'none'}
-					<p class="text-danger">No cost yet — add the China price on Opening costs.</p>
+					<p class="text-danger">No cost yet — add the buying price on Opening costs.</p>
 				{/if}
 
 				{#if d.source !== 'batch'}
