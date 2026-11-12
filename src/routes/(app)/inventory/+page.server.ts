@@ -71,7 +71,13 @@ export const load: PageServerLoad = async ({ url }) => {
 		})
 		.from(v)
 		.where(where)
-		.orderBy(desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`), asc(v.productTitle), asc(v.variantTitle))
+		// Products with the most stock first; a product's variants stay together.
+		.orderBy(
+			desc(sql`sum(max(coalesce(${v.shopifyOnHand}, 0), 0)) over (partition by ${v.productId})`),
+			asc(v.productTitle),
+			asc(v.productId),
+			asc(v.variantTitle)
+		)
 		.limit(PAGE_SIZE)
 		.offset((page - 1) * PAGE_SIZE);
 

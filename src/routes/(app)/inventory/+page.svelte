@@ -13,6 +13,7 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
+	import * as Sheet from '#lib/components/ui/sheet/index.js';
 	import Money from '#lib/components/app/money.svelte';
 	import Thumb from '#lib/components/app/thumb.svelte';
 	import Stat from '#lib/components/app/stat.svelte';
@@ -28,6 +29,8 @@
 	let edits = $state<Record<string, Edit>>({});
 	let busy = $state<string | null>(null);
 	let picked = $state<string[]>([]);
+	let changesOpen = $state(false);
+	let ratesOpen = $state(false);
 	const REASONS = [
 		{ id: 'returned', label: 'Returned to stock', cost: false },
 		{ id: 'damaged', label: 'Damaged', cost: true },
@@ -152,7 +155,10 @@
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Inventory</h1>
 			<p class="text-sm text-muted-foreground">
-				Product cost = China price × yuan rate + weight × DDP rate. Stock count comes from Shopify.
+				Estimates: ¥1 = Rs {fxRs || '—'} · DDP Rs {ddpRs ? ddpRs.toLocaleString('en-PK') : '—'}/kg ·
+				<button type="button" class="underline underline-offset-2 hover:text-foreground" onclick={() => (ratesOpen = true)}>Change</button>
+				{#if !ratesSet}<span class="text-warning"> — set both rates, yuan prices can't be costed without them</span>{/if}
+				{#if !data.openingRecorded}<span class="text-warning"> · opening stock not recorded</span>{/if}
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
@@ -211,142 +217,15 @@
 		<span>{s.value ? formatPct(Number(s.estimatedValue) / Number(s.value)) : '—'} of warehouse value is estimated</span>
 	</div>
 
-	{#if data.changes.length || data.lastStockCheck}
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Stock changes made in Shopify {#if data.changes.length}<StatusBadge tone="warning" label="{data.changes.length} to review" />{/if}</Card.Title>
-				<Card.Description>
-					Changes not explained by orders — returns put back, damaged or missing items, recounts. Damaged,
-					missing and count fixes go to the income statement as inventory write-offs (qty × cost).
-					{#if data.lastStockCheck}Last check {new Date(data.lastStockCheck).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}.{/if}
-				</Card.Description>
-			</Card.Header>
-			{#if data.changes.length}
-				<form method="POST" action={formAction('classify')} use:enhance={act('classify', () => (picked = []))}>
-					<Card.Content class="flex flex-wrap items-center gap-2 border-y bg-muted/40 py-2">
-						<span class="text-sm text-muted-foreground">{picked.length} selected</span>
-						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty > 0).map((c) => c.id))}>Select all +</Button>
-						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty < 0).map((c) => c.id))}>Select all −</Button>
-						<span class="ml-auto flex flex-wrap gap-1">
-							{#each REASONS as r (r.id)}
-								<Button type="submit" name="reason" value={r.id} size="xs" variant={r.cost ? 'outline' : 'secondary'} disabled={!picked.length || !!busy}>{r.label}</Button>
-							{/each}
-						</span>
-					</Card.Content>
-					<Card.Content class="max-h-[28rem] overflow-auto px-0">
-						<Table.Root>
-							<Table.Body>
-								{#each data.changes as c (c.id)}
-									<Table.Row>
-										<Table.Cell class="w-8 pl-6">
-											<input type="checkbox" name="id" value={c.id} bind:group={picked} aria-label="Select" />
-										</Table.Cell>
-										<Table.Cell class="text-sm text-muted-foreground">
-											{new Date(c.at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Karachi' })}
-										</Table.Cell>
-										<Table.Cell class="max-w-80">
-											<div class="flex items-center gap-3">
-												<Thumb src={c.imageUrl} alt={`${c.productTitle ?? ''} ${c.variantTitle ?? ''}`} size={32} />
-												<div class="min-w-0">
-													<div class="truncate">{c.productTitle ?? 'Deleted product'}</div>
-													<div class="truncate text-xs text-muted-foreground">{c.variantTitle ?? ''}{c.variantTitle && c.sku ? ' · ' : ''}{c.sku ?? ''}</div>
-												</div>
-											</div>
-										</Table.Cell>
-										<Table.Cell class={['num text-right font-medium', c.qty < 0 ? 'text-danger' : 'text-success']}>
-											{c.qty > 0 ? '+' : ''}{c.qty}
-										</Table.Cell>
-										<Table.Cell class="pr-6 text-right"><Money paisa={c.qty * c.unitCost} muted /></Table.Cell>
-									</Table.Row>
-								{/each}
-							</Table.Body>
-						</Table.Root>
-					</Card.Content>
-				</form>
-			{:else}
-				<Card.Content><p class="text-sm text-muted-foreground">Nothing to review.</p></Card.Content>
-			{/if}
-		</Card.Root>
+	{#if data.changes.length}
+		<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-soft px-4 py-2.5 text-sm text-warning">
+			<span>
+				<b>{data.changes.length}</b> stock change{data.changes.length === 1 ? '' : 's'} made in Shopify need a reason
+				(returned, damaged, missing…).
+			</span>
+			<Button size="sm" variant="outline" class="ml-auto" onclick={() => (changesOpen = true)}>Review</Button>
+		</div>
 	{/if}
-
-	<div class="grid gap-4 lg:grid-cols-2">
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Estimate rates</Card.Title>
-				<Card.Description>
-					Used for stock you already had. New purchases carry their own rates.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content>
-				<form
-					method="POST"
-					action={formAction('rates')}
-					use:enhance={act('rates')}
-					class="flex flex-wrap items-end gap-3"
-				>
-					<div class="grid gap-1.5">
-						<Label for="fx">Rs per 1 yuan</Label>
-						<Input
-							id="fx"
-							name="fx"
-							inputmode="decimal"
-							class="w-32"
-							value={fxRs || ''}
-							placeholder="e.g. 39.5"
-						/>
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="ddp">DDP Rs per kg</Label>
-						<Input
-							id="ddp"
-							name="ddp"
-							inputmode="decimal"
-							class="w-32"
-							value={ddpRs || ''}
-							placeholder="e.g. 1450"
-						/>
-					</div>
-					<Button type="submit" disabled={!!busy}>{busy === 'rates' ? 'Saving…' : 'Save rates'}</Button>
-				</form>
-				{#if !ratesSet}
-					<p class="mt-3 text-sm text-warning">Set both rates — yuan prices can't be costed without them.</p>
-				{/if}
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Stock ledger</Card.Title>
-				<Card.Description>
-					{#if data.openingRecorded}
-						Opening stock recorded. New stock now enters through Purchases.
-					{:else}
-						Records today's Shopify on-hand ({Number(s.units).toLocaleString('en-PK')} units) as the
-						starting point. Costs can still be filled in afterwards.
-					{/if}
-				</Card.Description>
-			</Card.Header>
-			{#if !data.openingRecorded}
-				<Card.Content>
-					<form
-						method="POST"
-						action={formAction('opening')}
-						use:enhance={async ({ cancel }) => {
-							const ok = await ask({
-								title: 'Record opening stock?',
-								description: `Today's Shopify on-hand (${Number(s.units).toLocaleString('en-PK')} units) becomes the starting point of the stock ledger. This is done once.`,
-								confirmLabel: 'Record opening stock'
-							});
-							if (!ok) return cancel();
-							return act('opening')();
-						}}
-					>
-						<Button type="submit" variant="outline" disabled={!!busy}>Record opening stock</Button>
-					</form>
-				</Card.Content>
-			{/if}
-		</Card.Root>
-	</div>
 
 	<Card.Root>
 		<Card.Header class="gap-3" data-sveltekit-noscroll>
@@ -367,7 +246,7 @@
 			</div>
 			<Card.Description>
 				Type the China price per piece. DDP / pc is weight × DDP rate unless you type one — “Local” sets 0
-				for items bought in Pakistan; amber = DDP above half the goods cost. Tick “correct” if the Shopify
+				for items bought in Pakistan; amber = DDP above 2× the goods cost. Tick “correct” if the Shopify
 				cost is already the full landed cost. Most stock first.
 				{#if data.view === 'noweight'}Weights are edited in Shopify, then “Pull from Shopify”.{/if}
 			</Card.Description>
@@ -523,3 +402,130 @@
 		<Button type="submit" disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save costs'}</Button>
 	</form>
 {/if}
+
+<Sheet.Root bind:open={changesOpen}>
+	<Sheet.Content side="right" class="w-full sm:max-w-2xl">
+		<Sheet.Header>
+			<Sheet.Title>Stock changes made in Shopify</Sheet.Title>
+			<Sheet.Description>
+				Changes not explained by orders — returns put back, damaged or missing items, recounts. Damaged,
+				missing and count fixes go to the income statement as inventory write-offs (qty × cost).
+				{#if data.lastStockCheck}Last check {new Date(data.lastStockCheck).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}.{/if}
+			</Sheet.Description>
+		</Sheet.Header>
+		{#if data.changes.length}
+			<div class="overflow-auto">
+				<form method="POST" action={formAction('classify')} use:enhance={act('classify', () => ((picked = []), (changesOpen = data.changes.length > 0)))}>
+					<div class="flex flex-wrap items-center gap-2 border-y bg-muted/40 py-2">
+						<span class="text-sm text-muted-foreground">{picked.length} selected</span>
+						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty > 0).map((c) => c.id))}>Select all +</Button>
+						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty < 0).map((c) => c.id))}>Select all −</Button>
+						<span class="ml-auto flex flex-wrap gap-1">
+							{#each REASONS as r (r.id)}
+								<Button type="submit" name="reason" value={r.id} size="xs" variant={r.cost ? 'outline' : 'secondary'} disabled={!picked.length || !!busy}>{r.label}</Button>
+							{/each}
+						</span>
+					</div>
+					<div class="max-h-[28rem] overflow-auto px-0">
+						<Table.Root>
+							<Table.Body>
+								{#each data.changes as c (c.id)}
+									<Table.Row>
+										<Table.Cell class="w-8 pl-6">
+											<input type="checkbox" name="id" value={c.id} bind:group={picked} aria-label="Select" />
+										</Table.Cell>
+										<Table.Cell class="text-sm text-muted-foreground">
+											{new Date(c.at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Karachi' })}
+										</Table.Cell>
+										<Table.Cell class="max-w-80">
+											<div class="flex items-center gap-3">
+												<Thumb src={c.imageUrl} alt={`${c.productTitle ?? ''} ${c.variantTitle ?? ''}`} size={32} />
+												<div class="min-w-0">
+													<div class="truncate">{c.productTitle ?? 'Deleted product'}</div>
+													<div class="truncate text-xs text-muted-foreground">{c.variantTitle ?? ''}{c.variantTitle && c.sku ? ' · ' : ''}{c.sku ?? ''}</div>
+												</div>
+											</div>
+										</Table.Cell>
+										<Table.Cell class={['num text-right font-medium', c.qty < 0 ? 'text-danger' : 'text-success']}>
+											{c.qty > 0 ? '+' : ''}{c.qty}
+										</Table.Cell>
+										<Table.Cell class="pr-6 text-right"><Money paisa={c.qty * c.unitCost} muted /></Table.Cell>
+									</Table.Row>
+								{/each}
+							</Table.Body>
+						</Table.Root>
+					</div>
+				</form>
+			</div>
+		{:else}
+			<p class="px-4 text-sm text-muted-foreground">Nothing to review.</p>
+		{/if}
+	</Sheet.Content>
+</Sheet.Root>
+
+<Sheet.Root bind:open={ratesOpen}>
+	<Sheet.Content side="right">
+		<Sheet.Header>
+			<Sheet.Title>Estimate rates</Sheet.Title>
+			<Sheet.Description>Used to cost stock you already had (China price × rate + weight × DDP). New purchases carry their own rates.</Sheet.Description>
+		</Sheet.Header>
+		<div class="grid gap-6 px-4">
+				<form
+					method="POST"
+					action={formAction('rates')}
+					use:enhance={act('rates', () => (ratesOpen = false))}
+					class="flex flex-wrap items-end gap-3"
+				>
+					<div class="grid gap-1.5">
+						<Label for="fx">Rs per 1 yuan</Label>
+						<Input
+							id="fx"
+							name="fx"
+							inputmode="decimal"
+							class="w-32"
+							value={fxRs || ''}
+							placeholder="e.g. 39.5"
+						/>
+					</div>
+					<div class="grid gap-1.5">
+						<Label for="ddp">DDP Rs per kg</Label>
+						<Input
+							id="ddp"
+							name="ddp"
+							inputmode="decimal"
+							class="w-32"
+							value={ddpRs || ''}
+							placeholder="e.g. 1450"
+						/>
+					</div>
+					<Button type="submit" disabled={!!busy}>{busy === 'rates' ? 'Saving…' : 'Save rates'}</Button>
+				</form>
+				{#if !ratesSet}
+					<p class="mt-3 text-sm text-warning">Set both rates — yuan prices can't be costed without them.</p>
+				{/if}
+			{#if !data.openingRecorded}
+				<div class="grid gap-2 border-t pt-4">
+					<p class="text-sm font-medium">Opening stock</p>
+					<p class="text-sm text-muted-foreground">
+						Records today's Shopify on-hand ({Number(s.units).toLocaleString('en-PK')} units) as the starting point. Done once; costs can be filled in afterwards.
+					</p>
+					<form
+						method="POST"
+						action={formAction('opening')}
+						use:enhance={async ({ cancel }) => {
+							const ok = await ask({
+								title: 'Record opening stock?',
+								description: `Today's Shopify on-hand (${Number(s.units).toLocaleString('en-PK')} units) becomes the starting point of the stock ledger. This is done once.`,
+								confirmLabel: 'Record opening stock'
+							});
+							if (!ok) return cancel();
+							return act('opening')();
+						}}
+					>
+						<Button type="submit" variant="outline" disabled={!!busy}>Record opening stock</Button>
+					</form>
+				</div>
+			{/if}
+		</div>
+	</Sheet.Content>
+</Sheet.Root>
