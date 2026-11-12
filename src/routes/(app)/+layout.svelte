@@ -72,8 +72,8 @@
 
 	/** What each sidebar bubble counts (shown on hover). */
 	const BADGE_HINT: Record<string, string> = {
-		couriers: 'parcels need a decision (conflicting data or not linked to an order) — see Needs attention',
-		inventory: 'stock changes made in Shopify need a reason'
+		couriers: 'parcel(s) need a decision (conflicting data or not linked to an order) — see Needs attention',
+		inventory: 'stock change(s) made in Shopify need a reason'
 	};
 	const hint = (key: string, n: number) => `${n} ${BADGE_HINT[key] ?? 'to check'}`;
 
