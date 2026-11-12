@@ -43,6 +43,7 @@ async function logRun<T>(kind: string, fn: () => Promise<T>): Promise<T> {
 
 type VariantNode = {
 	id: string;
+	requiresComponents: boolean;
 	title: string;
 	sku: string | null;
 	price: string;
@@ -93,7 +94,7 @@ export function syncVariants(stockAnchor?: string) {
 					productVariants(first: 100, after: $after) {
 						pageInfo { hasNextPage endCursor }
 						nodes {
-							id title sku price
+							id title sku price requiresComponents
 							product { id title status featuredMedia { preview { image { url } } } }
 							media(first: 1) { nodes { preview { image { url } } } }
 							inventoryItem {
@@ -122,6 +123,7 @@ export function syncVariants(stockAnchor?: string) {
 					inventoryItemId: gidId(v.inventoryItem.id),
 					status: v.product.status,
 					weightG: toGrams(v.inventoryItem.measurement?.weight),
+					isBundle: v.requiresComponents,
 					imageUrl:
 						v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
 					price: toPaisa(v.price),

@@ -28,7 +28,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		: [];
 	const byId = new Map(vars.map((x) => [x.id, x]));
 	const options = await db
-		.select({ id: v.id, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, imageUrl: v.imageUrl, status: v.status })
+		.select({ id: v.id, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, imageUrl: v.imageUrl, status: v.status, isBundle: v.isBundle })
 		.from(v)
 		.orderBy(asc(v.productTitle), asc(v.variantTitle));
 	return {
@@ -43,9 +43,9 @@ export const load: PageServerLoad = async ({ params }) => {
 					`${c.variant?.productTitle}${c.variant?.variantTitle}`
 				)
 			),
-		// Draft/archived products are leftovers — not offered.
+		// Draft/archived products are leftovers, and bundles are bought as their components.
 		options: options
-			.filter((o) => o.status === 'ACTIVE')
+			.filter((o) => o.status === 'ACTIVE' && !o.isBundle)
 			.map((o) => ({ id: o.id, title: o.productTitle, variant: o.variantTitle, sku: o.sku, image: o.imageUrl }))
 	};
 };

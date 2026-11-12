@@ -38,7 +38,9 @@ export const variants = sqliteTable(
 		inventoryItemId: text('inventory_item_id'),
 		status: text('status'), // ACTIVE / DRAFT / ARCHIVED
 		weightG: integer('weight_g'),
-		imageUrl: text('image_url'), // variant image, else product's main image (Shopify CDN)
+		imageUrl: text('image_url'),
+		/** Shopify bundle (requiresComponents): stock/cost come from its component products. */
+		isBundle: integer('is_bundle', { mode: 'boolean' }), // variant image, else product's main image (Shopify CDN)
 		price: money('price_paisa'),
 		avgCost: money('avg_cost_paisa'),
 		/** none = no cost yet · estimated = China price estimate · shopify = trusted Shopify cost · batch = from a landed import */
