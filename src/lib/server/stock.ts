@@ -5,7 +5,9 @@
  *                  + unit kg × DDP rate/kg
  *                  + share of extra batch costs (by goods value).
  * Landing a batch:
- *   1. reads live Shopify on-hand,
+ *   0. claims the batch (status → 'landing'; a second click is refused) and saves the
+ *      pre-receipt on-hand snapshot, so a retry after a failure reuses it,
+ *   1. reads live Shopify on-hand (first attempt only),
  *   2. freezes cost snapshots of everything sold so far at the old cost,
  *   3. new avg = (on_hand × old + qty × landed) / (on_hand + qty),
  *   4. pushes +qty (reason "received", idempotent per batch) and new cost to Shopify,
@@ -179,6 +181,7 @@ export async function landBatch(id: string, landedOn: string) {
 	const b = await loadBatch(id);
 	if (!b) throw new Error('Batch not found.');
 	if (b.batch.status === 'landed') throw new Error('Already landed.');
+	const retry = b.batch.status === 'landing';
 	if (!b.lines.length) throw new Error('Add items first.');
 	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000) throw new Error('Enter the exchange rate.');
 	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
@@ -191,11 +194,32 @@ export async function landBatch(id: string, landedOn: string) {
 	const missing = b.lines.filter((l) => !byId.get(l.variantId)?.inventoryItemId);
 	if (missing.length) throw new Error(`${missing.length} items are not linked to Shopify — run a product sync.`);
 
+	const { getSetting, setSetting } = await import('./settings.js');
+	const snapKey = `landing:${id}`;
+	if (!retry) {
+		// Claim atomically: only one request can move draft/paid → landing.
+		const claimed = await db
+			.update(schema.importBatches)
+			.set({ status: 'landing' })
+			.where(and(eq(schema.importBatches.id, id), inArray(schema.importBatches.status, ['draft', 'paid'])))
+			.returning({ id: schema.importBatches.id });
+		if (!claimed.length) throw new Error('This purchase is already being added — refresh the page.');
+	}
 	const locationId = await primaryLocation();
-	const onHand = await liveOnHand(
-		vars.map((x) => x.inventoryItemId!),
-		locationId
-	);
+	// On-hand BEFORE this receipt. Saved on the first attempt; a retry must not re-read it
+	// (Shopify may already include this batch's units).
+	let snap = await getSetting<Record<string, number>>(snapKey);
+	if (!snap) {
+		try {
+			snap = Object.fromEntries(await liveOnHand(vars.map((x) => x.inventoryItemId!), locationId));
+			await setSetting(snapKey, snap);
+		} catch (e) {
+			// Nothing pushed yet: release the claim so the user can simply try again.
+			await db.update(schema.importBatches).set({ status: b.batch.paidOn ? 'paid' : 'draft' }).where(eq(schema.importBatches.id, id));
+			throw e;
+		}
+	}
+	const onHand = new Map(Object.entries(snap));
 
 	const at = new Date(`${landedOn}T12:00:00+05:00`).toISOString();
 	const plan = b.lines.map((l) => {
@@ -271,6 +295,7 @@ export async function landBatch(id: string, landedOn: string) {
 			.set({ status: 'landed', landedOn })
 			.where(eq(schema.importBatches.id, id))
 	);
+	stmts.push(db.delete(schema.settings).where(eq(schema.settings.key, snapKey)));
 	// One batch = one transaction: the ledger is never half-written.
 	await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
 	return { items: plan.length, units: b.totals.units, costFailed: costFailed.length };

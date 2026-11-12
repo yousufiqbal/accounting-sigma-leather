@@ -22,7 +22,8 @@
 	type Edit = { qty: string; price: string; weight: string };
 
 	const b = $derived(data.batch);
-	const locked = $derived(b.status === 'landed');
+	const locked = $derived(b.status === 'landed' || b.status === 'landing');
+	const retrying = $derived(b.status === 'landing');
 	const isRmb = $derived(b.currency !== 'PKR');
 	const sym = $derived(isRmb ? '¥' : 'Rs');
 	const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
@@ -48,6 +49,7 @@
 	const STATUS = {
 		draft: { tone: 'muted', label: 'draft' },
 		paid: { tone: 'info', label: 'paid · on the way' },
+		landing: { tone: 'warning', label: 'adding to stock…' },
 		landed: { tone: 'success', label: 'landed' }
 	} as const;
 
@@ -86,6 +88,12 @@
 				{#if b.landedOn}· landed {b.landedOn}{/if}
 			</p>
 		</div>
+		{#if retrying}
+			<form method="POST" action={formAction('land')} use:enhance={act('land')} class="flex items-end gap-2">
+				<input type="hidden" name="date" value={today} />
+				<Button type="submit" disabled={!!busy}>{busy === 'land' ? 'Retrying…' : 'Retry adding to stock'}</Button>
+			</form>
+		{/if}
 		{#if !locked}
 			<div class="flex flex-wrap items-end gap-2">
 				{#if b.status === 'draft'}

@@ -247,6 +247,7 @@ function toRows(o: OrderNode) {
 			sku: li.sku || null,
 			title: li.title,
 			qty: li.currentQuantity,
+			orderedQty: li.quantity,
 			unitPrice: unit,
 			lineDiscount
 		};

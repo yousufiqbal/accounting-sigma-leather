@@ -19,7 +19,8 @@
 	let { data, form }: PageProps = $props();
 	type Row = (typeof data.rows)[number];
 
-	let edits = $state<Record<string, string>>({});
+	/** Edits keep their row, so changes made on other pages/filters still get pushed. */
+	let edits = $state<Record<string, { val: string; row: Row }>>({});
 	let busy = $state<string | null>(null);
 	let review = $state(false);
 	let showCosts = $state(false);
@@ -35,12 +36,12 @@
 	};
 	/** New price (paisa) if edited and different from current. */
 	const newPrice = (r: Row) => {
-		const p = edits[r.id] !== undefined ? parse(edits[r.id]) : null;
+		const p = edits[r.id] !== undefined ? parse(edits[r.id].val) : null;
 		return p !== null && p !== r.price ? p : null;
 	};
 	function setEdit(r: Row, val: string) {
 		if (val.trim() === '' || parse(val) === r.price) delete edits[r.id];
-		else edits[r.id] = val;
+		else edits[r.id] = { val, row: r };
 	}
 	const useSuggested = (r: Row) => r.suggested && setEdit(r, String(r.suggested / 100));
 
@@ -54,8 +55,8 @@
 		margin === null ? 'text-muted-foreground' : margin < 0 ? 'text-danger' : margin < e.target ? 'text-warning' : 'text-success';
 
 	const changes = $derived(
-		data.rows
-			.map((r) => ({ r, price: newPrice(r) }))
+		Object.values(edits)
+			.map(({ row }) => ({ r: row, price: newPrice(row) }))
 			.filter((c): c is { r: Row; price: number } => c.price !== null)
 	);
 	/** Monthly profit change if the same units sell (last 90 days × 30/90). */
@@ -243,7 +244,7 @@
 							<Table.Cell class="pr-6">
 								<div class="flex items-center gap-2">
 									<Input
-										value={edits[r.id] ?? ''}
+										value={edits[r.id]?.val ?? ''}
 										oninput={(ev) => setEdit(r, ev.currentTarget.value)}
 										placeholder={rs(r.price)}
 										inputmode="decimal"
@@ -254,7 +255,7 @@
 										<span class={['num text-xs whitespace-nowrap', tone(npProfit / np)]}>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span>
 									{/if}
 									{#if firstOfProduct(r, i) && np && siblings(r).length}
-										<Button size="xs" variant="ghost" title="Same price for all variants" onclick={() => siblings(r).forEach((s) => setEdit(s, edits[r.id]))}>all</Button>
+										<Button size="xs" variant="ghost" title="Same price for all variants" onclick={() => siblings(r).forEach((s) => setEdit(s, edits[r.id].val))}>all</Button>
 									{/if}
 								</div>
 							</Table.Cell>

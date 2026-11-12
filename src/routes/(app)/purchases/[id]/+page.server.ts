@@ -51,10 +51,10 @@ export const load: PageServerLoad = async ({ params }) => {
 async function editable(id: string) {
 	const batch = await db.query.importBatches.findFirst({ where: eq(schema.importBatches.id, id) });
 	if (!batch) error(404, 'Purchase not found');
-	if (batch.status === 'landed') return null;
+	if (batch.status === 'landed' || batch.status === 'landing') return null;
 	return batch;
 }
-const LANDED = { error: 'This purchase has arrived and can no longer be changed.' };
+const LANDED = { error: 'This purchase has arrived (or is being added to stock) and can no longer be changed.' };
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 /** Add qty to an existing line for the variant, or create one (weight from Shopify). */

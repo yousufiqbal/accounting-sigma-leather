@@ -76,7 +76,14 @@ export async function commitPending(id: string) {
 			counts: JSON.stringify(plan.counts)
 		})
 		.returning({ id: schema.importFiles.id });
-	const counts = await applyMerge(plan, `file:${file.id}`);
+	let counts;
+	try {
+		counts = await applyMerge(plan, `file:${file.id}`);
+	} catch (e) {
+		// Merges are idempotent: forget the file so the same upload can be committed again.
+		await db.delete(schema.importFiles).where(eq(schema.importFiles.id, file.id));
+		throw e;
+	}
 	await linkShipmentsToOrders();
 	await settleDeliveries();
 	await db.delete(schema.pendingImports).where(eq(schema.pendingImports.id, id));

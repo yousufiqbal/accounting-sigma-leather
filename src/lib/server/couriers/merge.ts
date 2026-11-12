@@ -147,7 +147,14 @@ export function mergeOne(
 
 	// Order link (never override a manual decision)
 	if (existing.matchStatus !== 'manual' && existing.matchStatus !== 'excluded') {
-		if (inc.orderName) set('orderName', inc.orderName);
+		if (inc.orderName) {
+			set('orderName', inc.orderName);
+			// Courier corrected the order number: drop the old link, linkShipmentsToOrders re-links.
+			if (existing.orderName && inc.orderName !== existing.orderName && existing.orderId && !inc.orderId) {
+				set('orderId', null as never);
+				set('matchStatus', 'unmatched');
+			}
+		}
 		if (inc.extraParcel !== undefined) set('extraParcel', inc.extraParcel);
 		if (inc.orderId) {
 			set('orderId', inc.orderId);

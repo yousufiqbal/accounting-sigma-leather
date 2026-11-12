@@ -93,6 +93,8 @@ export async function linkPostexCprs(
 		.select({ id: schema.shipments.id, trackingNo: schema.shipments.trackingNo })
 		.from(schema.shipments)
 		.where(pendingWhere)
+		// Never-checked first, then the longest-unchecked — parcels that never settle can't starve newer ones.
+		.orderBy(sql`${schema.shipments.cprCheckedAt} is not null`, schema.shipments.cprCheckedAt)
 		.limit(limit);
 
 	let linked = 0;
@@ -106,6 +108,10 @@ export async function linkPostexCprs(
 			} catch {
 				continue;
 			}
+			await db
+				.update(schema.shipments)
+				.set({ cprCheckedAt: new Date().toISOString() })
+				.where(eq(schema.shipments.id, p.id));
 			if (!ps?.settle || !ps.cpr1) continue;
 			const date = parsePkTime(ps.cpr1Date ?? ps.settlementDate);
 			const [stmt] = await db

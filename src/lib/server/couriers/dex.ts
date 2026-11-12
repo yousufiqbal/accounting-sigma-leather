@@ -148,8 +148,10 @@ export function parseDex(grid: Grid): ParsedFile {
 			const finalStatus = one(r, 'finalStatus');
 			const isDelivered = /^delivered$/i.test(finalStatus);
 			const isReturned = /return/i.test(finalStatus);
-			if (!isDelivered && !isReturned)
-				warnings.push(`${tracking}: unexpected status "${finalStatus}"`);
+			if (!isDelivered && !isReturned) {
+				errors.push(`${tracking}: unknown final status "${finalStatus}" — not imported (tell the developer how to treat it)`);
+				continue;
+			}
 
 			const cod = paisa(one(r, 'cod'));
 			const shippingFee = absPaisa(one(r, 'shippingFee'));

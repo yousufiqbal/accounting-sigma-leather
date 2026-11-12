@@ -9,8 +9,15 @@ import {
 import type { Actions, PageServerLoad } from './$types';
 
 function safeNext(next: string | null): string {
-	// Only allow same-site relative paths.
-	return next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+	// Only same-site relative paths. Browsers treat "/\x" like "//x", so reject backslashes too,
+	// and make sure the URL still resolves to this origin.
+	if (!next || !next.startsWith('/') || next.startsWith('//') || next.includes('\\')) return '/';
+	try {
+		const u = new URL(next, 'http://local.invalid');
+		return u.origin === 'http://local.invalid' ? u.pathname + u.search + u.hash : '/';
+	} catch {
+		return '/';
+	}
 }
 
 export const load: PageServerLoad = ({ locals, url }) => {

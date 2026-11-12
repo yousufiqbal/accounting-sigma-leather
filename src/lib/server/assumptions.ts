@@ -52,7 +52,7 @@ async function estimatedFee() {
 	return v.length ? v[Math.floor(v.length / 2)] : 0;
 }
 
-/** Retire assumed parcels for orders that now have real courier data. */
+/** Retire assumed parcels for orders that now have real data (courier or a manual delivery). */
 async function retireAssumed() {
 	const r = await db.run(sql`
 		update shipments set status = 'cancelled',
@@ -60,7 +60,7 @@ async function retireAssumed() {
 			updated_at = ${new Date().toISOString()}
 		where courier = 'manual' and tracking_no like 'A-%' and status != 'cancelled'
 			and exists (select 1 from shipments c where c.order_id = shipments.order_id
-				and c.courier != 'manual' and c.status != 'cancelled')`);
+				and c.id != shipments.id and c.status != 'cancelled')`);
 	return r.rowsAffected;
 }
 

@@ -20,6 +20,7 @@
 	const STATUS = {
 		draft: { tone: 'muted', label: 'draft' },
 		paid: { tone: 'info', label: 'paid · on the way' },
+		landing: { tone: 'warning', label: 'adding to stock…' },
 		landed: { tone: 'success', label: 'landed' }
 	} as const;
 	const fmtDate = (d: string | null) =>

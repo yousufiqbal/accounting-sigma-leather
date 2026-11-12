@@ -97,7 +97,7 @@ export const importBatches = sqliteTable('import_batches', {
 		.default('RMB'),
 	fxRateX10000: integer('fx_rate_x10000').notNull().default(0), // PKR per 1 unit × 10^4
 	ddpRatePerKg: money('ddp_rate_per_kg_paisa'),
-	status: text('status', { enum: ['draft', 'paid', 'landed'] })
+	status: text('status', { enum: ['draft', 'paid', 'landing', 'landed'] })
 		.notNull()
 		.default('draft'),
 	paidOn: text('paid_on'),
@@ -192,6 +192,7 @@ export const orderLines = sqliteTable(
 		sku: text('sku'),
 		title: text('title').notNull(),
 		qty: integer('qty').notNull(), // current quantity (after edits/removals)
+		orderedQty: integer('ordered_qty'), // as originally ordered (cancelled orders have qty 0)
 		unitPrice: money('unit_price_paisa'),
 		lineDiscount: money('line_discount_paisa'),
 		costSnapshot: integer('cost_snapshot_paisa'), // avg cost at fulfillment
@@ -255,6 +256,7 @@ export const shipments = sqliteTable(
 		taxesEstimated: integer('taxes_estimated', { mode: 'boolean' }).notNull().default(false),
 		statementId: text('statement_id'),
 		settledAt: text('settled_at'),
+		cprCheckedAt: text('cpr_checked_at'), // last PostEx payment-status check
 		conflictNote: text('conflict_note'), // set when a source disagrees; needs review
 		raw: text('raw'), // json of last source row
 		createdAt: createdAt(),

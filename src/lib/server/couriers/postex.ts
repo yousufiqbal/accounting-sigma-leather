@@ -47,9 +47,13 @@ export function normalizePostexApi(o: PostexApiOrder): NormalizedShipment {
 	const returnFee = absPaisa(o.reversalFee ?? 0);
 	const returnFeeTax = absPaisa(o.reversalTax ?? 0);
 	const final = status === 'delivered' || status === 'returned';
+	// No delivery date from PostEx → payment date, else pickup/booking date, so the parcel
+	// still lands in a month (better roughly dated than missing from every report).
 	const finalAt = final
 		? (parsePkTime(o.orderDeliveryDate) ??
-			(status === 'returned' ? parsePkTime(o.reservePaymentDate ?? o.upfrontPaymentDate) : null))
+			parsePkTime(o.reservePaymentDate ?? o.upfrontPaymentDate) ??
+			parsePkTime(o.orderPickupDate) ??
+			parsePkTime(o.transactionDate))
 		: null;
 	const codIn = status === 'delivered' ? cod : 0;
 	return {

@@ -55,11 +55,14 @@ export async function incomeStatement(month: string) {
 		adjust = 0,
 		courierOnly = 0;
 	const normalIds: string[] = [];
+	/** Cancelled/voided in Shopify but delivered: Shopify zeroed their lines, cost the ordered qty. */
+	const courierOnlyIds: string[] = [];
 	for (const o of orders) {
 		if (o.cancelledAt || o.total <= 0) {
 			// Cancelled/voided in Shopify but the courier delivered and collected.
 			gross += o.cod;
 			courierOnly++;
+			courierOnlyIds.push(o.id);
 			continue;
 		}
 		normalIds.push(o.id);
@@ -74,18 +77,24 @@ export async function incomeStatement(month: string) {
 	const netSales = gross - prepaidDisc - otherDisc + shipping + adjust;
 
 	// ── COGS + per product ──
-	const lines = normalIds.length
+	const lines = normalIds.length + courierOnlyIds.length
 		? ((await db.all(sql`
+			with ln as (
+				select l.*, case when l.order_id in (select value from json_each(${JSON.stringify(courierOnlyIds)}))
+					then coalesce(nullif(l.qty, 0), l.ordered_qty, 0) else l.qty end as q
+				from order_lines l
+				where l.order_id in (select value from json_each(${JSON.stringify([...normalIds, ...courierOnlyIds])}))
+			)
 			select coalesce(v.product_id, 'line:' || l.title) as productKey,
 				coalesce(v.product_title, l.title) as product,
-				sum(l.qty) as units,
-				sum(l.qty * l.unit_price_paisa - l.line_discount_paisa) as sales,
-				sum(l.qty * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0)) as cogs,
-				sum(case when coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0) = 0 then l.qty else 0 end) as unitsNoCost,
+				sum(l.q) as units,
+				sum(l.q * l.unit_price_paisa - l.line_discount_paisa) as sales,
+				sum(l.q * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0)) as cogs,
+				sum(case when coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0) = 0 then l.q else 0 end) as unitsNoCost,
 				sum(case when l.cost_estimated = 1 or (l.cost_snapshot_paisa is null and coalesce(v.cost_source, 'none') != 'batch')
-					then l.qty * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0) else 0 end) as cogsEstimated
-			from order_lines l left join variants v on v.id = l.variant_id
-			where l.order_id in (select value from json_each(${JSON.stringify(normalIds)})) and l.qty > 0
+					then l.q * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0) else 0 end) as cogsEstimated
+			from ln l left join variants v on v.id = l.variant_id
+			where l.q > 0
 			group by productKey
 			order by sales desc`)) as {
 				productKey: string;
