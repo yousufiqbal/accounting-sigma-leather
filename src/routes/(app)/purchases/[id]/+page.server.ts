@@ -154,7 +154,7 @@ export const actions: Actions = {
 			return fail(400, { error: 'Price must be a number.' });
 		}
 		if (!(await addItem(params.id, id, qty, price))) return fail(400, { error: 'Product not found.' });
-		return { saved: 'Item added.' };
+		return { added: true }; // quiet: the new line appearing is feedback enough
 	},
 
 	/** Paste lines: "SKU or variant id, qty, price" (comma or tab). */
