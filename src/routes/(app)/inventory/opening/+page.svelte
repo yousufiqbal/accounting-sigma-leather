@@ -122,6 +122,55 @@
 		{ id: 'all', label: `All not yet purchased (${data.counts.all})` }
 	]);
 
+	// ── Spreadsheet-style entry ──
+	let saveForm = $state<HTMLFormElement>();
+	const COLS = ['weight', 'price', 'ddp'] as const;
+	type Col = (typeof COLS)[number];
+	function focusCell(row: number, col: string) {
+		const el = document.querySelector<HTMLInputElement>(`input[data-row="${row}"][data-col="${col}"]`);
+		if (el) {
+			el.focus();
+			el.select();
+		}
+	}
+	function gridKeys(e: KeyboardEvent) {
+		const t = e.target as HTMLElement;
+		const col = t.dataset?.col;
+		if (!col) return;
+		const row = Number(t.dataset.row);
+		if (e.key === 'Enter' || e.key === 'ArrowDown') {
+			e.preventDefault();
+			focusCell(e.shiftKey && e.key === 'Enter' ? row - 1 : row + 1, col);
+		} else if (e.key === 'ArrowUp') {
+			e.preventDefault();
+			focusCell(row - 1, col);
+		}
+	}
+	/** Paste from Excel: lines fill down from this row; tab-separated cells fill across (weight → price → DDP). */
+	function gridPaste(e: ClipboardEvent) {
+		const t = e.target as HTMLElement;
+		const col = t.dataset?.col as Col | undefined;
+		const text = e.clipboardData?.getData('text/plain') ?? '';
+		if (!col || !/[\t\n]/.test(text.trim())) return; // single value: normal paste
+		e.preventDefault();
+		const start = Number(t.dataset.row);
+		const lines = text.replace(/\r/g, '').replace(/\n+$/, '').split('\n');
+		const first = COLS.indexOf(col);
+		lines.forEach((line, k) => {
+			const r = data.rows[start + k];
+			if (!r) return;
+			line.split('\t').forEach((raw, j) => {
+				const c = COLS[first + j];
+				if (!c) return;
+				const val = raw.trim().replace(/[^0-9.,-]/g, '');
+				if (c === 'price') set(r, { price: val });
+				else if (c === 'weight') set(r, { weight: val });
+				else set(r, { ddp: val });
+			});
+		});
+		focusCell(Math.min(start + lines.length, data.rows.length - 1), col);
+	}
+
 	const act =
 		(name: string, after?: () => void) =>
 		() => {
@@ -223,11 +272,14 @@
 				</form>
 			</div>
 			<Card.Description>
-				Buying price per piece (¥ from China, Rs from Pakistan). Weight is saved to Shopify too. DDP / pc = weight × DDP rate unless you type one —
+				Buying price per piece (¥ from China, Rs from Pakistan). Enter/↓ = next row · paste a column from
+				Excel to fill down · Ctrl+S saves. Weight is saved to Shopify too. DDP / pc = weight × DDP rate unless you type one —
 				“Local” = 0 for items bought in Pakistan; amber = DDP above 2× the goods cost.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
+			<!-- Spreadsheet-style entry: Enter/↓/↑ move between rows, paste from Excel fills down/across. -->
+			<div role="presentation" onkeydown={gridKeys} onpaste={gridPaste}>
 			<Table.Root>
 				<Table.Header>
 					<Table.Row>
@@ -264,6 +316,9 @@
 										placeholder="g"
 										class={['h-8 w-20 text-right', !e.weight && 'border-danger/60']}
 										aria-label="Weight in grams"
+										data-col="weight"
+										data-row={i}
+										onfocus={(ev) => ev.currentTarget.select()}
 									/>
 									{#if e.weight && siblings(r).length && firstOfProduct(r, i)}
 										<Button size="icon-sm" variant="ghost" title="Same weight for all variants" onclick={() => copyToSiblings(r, 'weight')}><CopyCheck /></Button>
@@ -278,6 +333,9 @@
 										inputmode="decimal"
 										class="h-8 w-24 text-right"
 										aria-label="Buying price for {r.productTitle} {r.variantTitle ?? ''}"
+										data-col="price"
+										data-row={i}
+										onfocus={(ev) => ev.currentTarget.select()}
 									/>
 									<select
 										class="h-8 rounded-md border bg-background px-1.5 text-sm"
@@ -304,6 +362,9 @@
 											title="Blank = weight × DDP rate. Type 0 for locally bought items."
 											class={['h-8 w-20 text-right', ddpHigh(r) && 'border-warning text-warning placeholder:text-warning']}
 											aria-label="DDP per piece"
+											data-col="ddp"
+											data-row={i}
+											onfocus={(ev) => ev.currentTarget.select()}
 										/>
 										{#if e.ddp.trim() !== '0'}
 											<Button size="xs" variant="ghost" onclick={() => set(r, { ddp: '0' })}>Local</Button>
@@ -326,6 +387,7 @@
 					{/each}
 				</Table.Body>
 			</Table.Root>
+			</div>
 		</Card.Content>
 		{#if data.pageCount > 1}
 			<Card.Footer class="flex items-center justify-between text-sm text-muted-foreground">
@@ -339,10 +401,20 @@
 	</Card.Root>
 </div>
 
+<svelte:window
+	onkeydown={(e) => {
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+			e.preventDefault();
+			if (dirty && !busy) saveForm?.requestSubmit();
+		}
+	}}
+/>
+
 {#if dirty}
 	<form
 		method="POST"
 		action={formAction('save')}
+		bind:this={saveForm}
 		use:enhance={act('save', () => (edits = {}))}
 		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
 	>
