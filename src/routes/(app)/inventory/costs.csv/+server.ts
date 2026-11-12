@@ -52,7 +52,7 @@ export const GET: RequestHandler = async () => {
 	return new Response(body, {
 		headers: {
 			'content-type': 'text/csv; charset=utf-8',
-			'content-disposition': `attachment; filename="sigma-costs-${date}.csv"`
+			'content-disposition': `attachment; filename="product-costs-${date}.csv"`
 		}
 	});
 };

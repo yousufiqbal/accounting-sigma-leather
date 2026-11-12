@@ -4,11 +4,11 @@
 	import { Toaster } from '#lib/components/ui/sonner/index.js';
 	import type { LayoutProps } from './$types';
 
-	let { children }: LayoutProps = $props();
+	let { data, children }: LayoutProps = $props();
 </script>
 
 <svelte:head>
-	<title>Sigma Accounts</title>
+	<title>{data.storeName} · Accounts</title>
 </svelte:head>
 
 <ModeWatcher />

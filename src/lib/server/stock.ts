@@ -137,7 +137,7 @@ async function pushReceipt(
 				input: {
 					name: 'available',
 					reason: 'received',
-					referenceDocumentUri: `sigma-accounting://import-batch/${encodeURIComponent(ref)}`,
+					referenceDocumentUri: `accounting-panel://import-batch/${encodeURIComponent(ref)}`,
 					changes: changes.slice(i, i + 100).map((c) => ({
 						inventoryItemId: `gid://shopify/InventoryItem/${c.inventoryItemId}`,
 						locationId,

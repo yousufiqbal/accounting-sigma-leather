@@ -30,6 +30,10 @@ export const variables = defineEnvVars({
 			return value;
 		}
 	},
+	STORE_NAME: {
+		description: 'Shown in the sidebar and page titles. Default: the Shopify shop name',
+		schema: optional
+	},
 	SHOPIFY_STORE_DOMAIN: { description: 'e.g. sigma-leather.myshopify.com', schema: optional },
 	SHOPIFY_CLIENT_ID: { description: 'Dev Dashboard app → Settings → Client ID', schema: optional },
 	SHOPIFY_CLIENT_SECRET: {

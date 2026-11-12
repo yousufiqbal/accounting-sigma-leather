@@ -6,18 +6,18 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import type { PageProps } from './$types';
 
-	let { form }: PageProps = $props();
+	let { data, form }: PageProps = $props();
 	let submitting = $state(false);
 </script>
 
 <svelte:head>
-	<title>Sign in · Sigma Accounts</title>
+	<title>Sign in · {data.storeName} Accounts</title>
 </svelte:head>
 
 <main class="grid min-h-dvh place-items-center bg-muted/40 px-4">
 	<Card.Root class="w-full max-w-sm">
 		<Card.Header>
-			<Card.Title class="text-xl">Sigma Accounts</Card.Title>
+			<Card.Title class="text-xl">{data.storeName} Accounts</Card.Title>
 			<Card.Description>Admin sign in</Card.Description>
 		</Card.Header>
 		<Card.Content>

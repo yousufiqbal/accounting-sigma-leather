@@ -1,18 +1,21 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { toggleMode } from 'mode-watcher';
+	import { mode, toggleMode } from 'mode-watcher';
 	import ChevronLeft from '@lucide/svelte/icons/chevron-left';
 	import ChevronRight from '@lucide/svelte/icons/chevron-right';
+	import ChevronsUpDown from '@lucide/svelte/icons/chevrons-up-down';
 	import LogOut from '@lucide/svelte/icons/log-out';
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
 	import * as Sidebar from '#lib/components/ui/sidebar/index.js';
+	import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
-	import { nav } from '#lib/nav.js';
-	import { monthLabel, shiftMonth } from '#lib/month.js';
+	import { nav, settingsNav } from '#lib/nav.js';
+	import { currentMonth, monthLabel, shiftMonth } from '#lib/month.js';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
+	let logoutForm = $state<HTMLFormElement>();
 
 	/** Same path, different month — keeps the month picker global. */
 	function monthHref(delta: number) {
@@ -22,61 +25,123 @@
 	}
 
 	/** Nav links carry the selected month along. */
-	function navHref(href: string) {
-		return `${href}?m=${data.month}`;
-	}
+	const navHref = (href: string) => `${href}?m=${data.month}`;
+	const isActive = (href: string) =>
+		href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+	const initials = (s: string) =>
+		s
+			.split(/[\s@._-]+/)
+			.filter(Boolean)
+			.slice(0, 2)
+			.map((w) => w[0].toUpperCase())
+			.join('');
 
-	function isActive(href: string) {
-		return href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
-	}
+	/** Roomy rows, muted icons, active = filled pill with a primary icon. */
+	const item =
+		'h-9 gap-3 px-2.5 text-[13.5px] text-sidebar-foreground/75 hover:text-sidebar-foreground [&_svg]:text-sidebar-foreground/50 data-active:bg-sidebar-accent data-active:text-sidebar-foreground data-active:shadow-xs data-active:[&_svg]:text-sidebar-primary hover:[&_svg]:text-sidebar-foreground';
 </script>
+
+<form bind:this={logoutForm} method="POST" action="/logout" hidden></form>
 
 <Sidebar.Provider>
 	<Sidebar.Root collapsible="icon">
-		<Sidebar.Header>
-			<div class="flex items-center gap-2 px-2 py-1.5">
-				<div
-					class="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-sm font-semibold text-primary-foreground"
+		<Sidebar.Header class="h-14 justify-center border-b border-sidebar-border px-2">
+			<a
+				href={navHref('/')}
+				class="flex items-center gap-2.5 rounded-md px-1.5 py-1 outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:px-0"
+			>
+				<span
+					class="grid size-7 shrink-0 place-items-center rounded-md bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground"
 				>
-					S
-				</div>
-				<div class="grid leading-tight group-data-[collapsible=icon]:hidden">
-					<span class="text-sm font-semibold">Sigma Leather</span>
-					<span class="text-xs text-muted-foreground">Accounts</span>
-				</div>
-			</div>
+					{initials(data.storeName)}
+				</span>
+				<span class="grid min-w-0 leading-none group-data-[collapsible=icon]:hidden">
+					<span class="truncate text-sm font-semibold tracking-tight">{data.storeName}</span>
+					<span class="mt-1 truncate text-[11px] text-muted-foreground">Accounts</span>
+				</span>
+			</a>
 		</Sidebar.Header>
-		<Sidebar.Content>
-			<Sidebar.Group>
-				<Sidebar.Menu>
-					{#each nav as item (item.href)}
-						<Sidebar.MenuItem>
-							<Sidebar.MenuButton isActive={isActive(item.href)} tooltipContent={item.label}>
-								{#snippet child({ props })}
-									<a href={navHref(item.href)} {...props}>
-										<item.icon />
-										<span>{item.label}</span>
-									</a>
-								{/snippet}
-							</Sidebar.MenuButton>
-						</Sidebar.MenuItem>
-					{/each}
-				</Sidebar.Menu>
-			</Sidebar.Group>
-		</Sidebar.Content>
-		<Sidebar.Footer>
-			<Sidebar.Menu>
-				<Sidebar.MenuItem>
-					<form method="POST" action="/logout">
-						<Sidebar.MenuButton tooltipContent="Sign out">
+
+		<Sidebar.Content class="px-2 py-3">
+			<Sidebar.Menu class="gap-1">
+				{#each nav as n (n.href)}
+					{@const count = 'badge' in n ? data.attention[n.badge] : 0}
+					<Sidebar.MenuItem>
+						<Sidebar.MenuButton
+							isActive={isActive(n.href)}
+							tooltipContent={count ? `${n.label} · ${count} to check` : n.label}
+							class={item}
+						>
 							{#snippet child({ props })}
-								<button type="submit" {...props}>
-									<LogOut />
-									<span>Sign out</span>
-								</button>
+								<a href={navHref(n.href)} {...props}>
+									<n.icon />
+									<span>{n.label}</span>
+								</a>
 							{/snippet}
 						</Sidebar.MenuButton>
-					</form>
+						{#if count}
+							<Sidebar.MenuBadge
+								class="top-2! right-2 h-5 rounded-full bg-warning-soft px-1.5 text-[11px] text-warning peer-hover/menu-button:text-warning peer-data-active/menu-button:text-warning"
+							>
+								{count > 99 ? '99+' : count}
+							</Sidebar.MenuBadge>
+						{/if}
+					</Sidebar.MenuItem>
+				{/each}
+			</Sidebar.Menu>
+		</Sidebar.Content>
+
+		<Sidebar.Footer class="gap-1 border-t border-sidebar-border p-2">
+			<Sidebar.Menu>
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton
+						isActive={isActive(settingsNav.href)}
+						tooltipContent={settingsNav.label}
+						class={item}
+					>
+						{#snippet child({ props })}
+							<a href={navHref(settingsNav.href)} {...props}>
+								<settingsNav.icon />
+								<span>{settingsNav.label}</span>
+							</a>
+						{/snippet}
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
+				<Sidebar.MenuItem>
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
+							{#snippet child({ props })}
+								<Sidebar.MenuButton
+									size="lg"
+									{...props}
+									class="h-11 gap-2.5 px-1.5 data-[state=open]:bg-sidebar-accent"
+								>
+									<span
+										class="grid size-7 shrink-0 place-items-center rounded-full bg-sidebar-accent text-[11px] font-semibold ring-1 ring-sidebar-border"
+									>
+										{initials(data.email)}
+									</span>
+									<span class="grid min-w-0 flex-1 leading-none">
+										<span class="truncate text-[13px] font-medium">Admin</span>
+										<span class="mt-1 truncate text-[11px] text-muted-foreground">{data.email}</span>
+									</span>
+									<ChevronsUpDown class="ml-auto size-3.5! text-muted-foreground" />
+								</Sidebar.MenuButton>
+							{/snippet}
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content side="top" align="start" sideOffset={6} class="min-w-56">
+							<DropdownMenu.Label class="truncate text-xs font-normal text-muted-foreground">
+								{data.email}
+							</DropdownMenu.Label>
+							<DropdownMenu.Separator />
+							<DropdownMenu.Item onSelect={toggleMode}>
+								{#if mode.current === 'dark'}<Sun /> Light mode{:else}<Moon /> Dark mode{/if}
+							</DropdownMenu.Item>
+							<DropdownMenu.Item onSelect={() => logoutForm?.requestSubmit()}>
+								<LogOut /> Sign out
+							</DropdownMenu.Item>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
 				</Sidebar.MenuItem>
 			</Sidebar.Menu>
 		</Sidebar.Footer>
@@ -85,20 +150,21 @@
 
 	<Sidebar.Inset>
 		<header
-			class="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur"
+			class="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur"
 		>
-			<Sidebar.Trigger class="-ml-1" />
-			<div class="ml-auto flex items-center gap-1">
+			<Sidebar.Trigger class="-ml-1 text-muted-foreground" />
+			<div class="ml-auto flex items-center rounded-lg border bg-card p-0.5 shadow-xs">
 				<Button variant="ghost" size="icon-sm" href={monthHref(-1)} aria-label="Previous month">
 					<ChevronLeft />
 				</Button>
-				<span class="min-w-32 text-center text-sm font-medium">{monthLabel(data.month)}</span>
+				<span class="flex min-w-36 items-center justify-center gap-1.5 text-sm font-medium">
+					{monthLabel(data.month)}
+					{#if data.month === currentMonth()}
+						<span class="size-1.5 rounded-full bg-success" title="Current month"></span>
+					{/if}
+				</span>
 				<Button variant="ghost" size="icon-sm" href={monthHref(1)} aria-label="Next month">
 					<ChevronRight />
-				</Button>
-				<Button variant="ghost" size="icon-sm" onclick={toggleMode} aria-label="Toggle theme">
-					<Sun class="dark:hidden" />
-					<Moon class="hidden dark:block" />
 				</Button>
 			</div>
 		</header>
