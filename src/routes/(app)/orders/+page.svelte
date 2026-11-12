@@ -137,7 +137,7 @@
 	</div>
 
 	<Card.Root>
-		<Card.Header class="gap-3">
+		<Card.Header class="gap-3" data-sveltekit-noscroll>
 			<div class="flex flex-wrap items-center gap-1">
 				{#each views as v (v.id)}
 					<Button
