@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
+	import { ask, notice } from '#lib/confirm.svelte.js';
 	import { enhance } from '$app/forms';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
@@ -107,17 +108,18 @@
 					method="POST"
 					action={formAction('land')}
 					class="flex items-end gap-2"
-					use:enhance={({ cancel }) => {
+					use:enhance={async ({ cancel }) => {
 						if (dirty) {
-							alert('Save or discard your item changes first.');
-							return cancel();
+							cancel();
+							await notice({ title: 'Unsaved item changes', description: 'Save or discard your item changes first.' });
+							return;
 						}
-						if (
-							!confirm(
-								`Land "${b.ref}"?\n\nThis ADDS ${data.totals.units} units to Shopify stock and updates the cost per item in Shopify. It cannot be undone from here.`
-							)
-						)
-							return cancel();
+						const ok = await ask({
+							title: `Add “${b.ref}” to stock?`,
+							description: `This adds ${data.totals.units} units to Shopify stock and updates the cost per item in Shopify. It cannot be undone from here.`,
+							confirmLabel: 'Add to stock'
+						});
+						if (!ok) return cancel();
 						return act('land')();
 					}}
 				>
@@ -387,8 +389,14 @@
 						method="POST"
 						action={formAction('delete')}
 						class="mt-3 border-t pt-3"
-						use:enhance={({ cancel }) => {
-							if (!confirm(`Delete purchase "${b.ref}" and its ${data.lines.length} items?`)) return cancel();
+						use:enhance={async ({ cancel }) => {
+							const ok = await ask({
+								title: `Delete purchase “${b.ref}”?`,
+								description: `Its ${data.lines.length} items and costs are removed too.`,
+								confirmLabel: 'Delete',
+								destructive: true
+							});
+							if (!ok) return cancel();
 						}}
 					>
 						<Button type="submit" variant="ghost" size="sm" class="text-danger">Delete purchase</Button>

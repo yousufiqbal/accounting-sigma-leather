@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
+	import { ask } from '#lib/confirm.svelte.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
@@ -340,9 +341,13 @@
 					<form
 						method="POST"
 						action={formAction('opening')}
-						use:enhance={({ cancel }) => {
-							if (!confirm('Record current Shopify stock as opening stock? This is done once.'))
-								return cancel();
+						use:enhance={async ({ cancel }) => {
+							const ok = await ask({
+								title: 'Record opening stock?',
+								description: `Today's Shopify on-hand (${Number(s.units).toLocaleString('en-PK')} units) becomes the starting point of the stock ledger. This is done once.`,
+								confirmLabel: 'Record opening stock'
+							});
+							if (!ok) return cancel();
 							return act('opening')();
 						}}
 					>

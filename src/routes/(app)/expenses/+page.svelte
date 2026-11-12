@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
+	import { ask } from '#lib/confirm.svelte.js';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Pencil from '@lucide/svelte/icons/pencil';
@@ -137,8 +138,14 @@
 										<form
 											method="POST"
 											action={formAction('delete')}
-											use:enhance={({ cancel }) => {
-												if (!confirm(`Delete ${formatRs(e.amount)} ${catById.get(e.categoryId)?.name ?? ''}?`)) cancel();
+											use:enhance={async ({ cancel }) => {
+												const ok = await ask({
+													title: 'Delete expense?',
+													description: `${formatRs(e.amount)} · ${catById.get(e.categoryId)?.name ?? ''} · ${fmtDate(e.date)}${e.note ? ` · ${e.note}` : ''}`,
+													confirmLabel: 'Delete',
+													destructive: true
+												});
+												if (!ok) cancel();
 											}}
 										>
 											<input type="hidden" name="id" value={e.id} />
@@ -170,8 +177,9 @@
 				<form
 					method="POST"
 					action={formAction('removeCategory')}
-					use:enhance={({ cancel }) => {
-						if (!confirm(`Remove category “${c.name}”?`)) cancel();
+					use:enhance={async ({ cancel }) => {
+						const ok = await ask({ title: `Remove category “${c.name}”?`, confirmLabel: 'Remove', destructive: true });
+						if (!ok) cancel();
 					}}
 					class="inline-flex items-center gap-1 rounded-full border bg-card py-0.5 pr-0.5 pl-3"
 				>
