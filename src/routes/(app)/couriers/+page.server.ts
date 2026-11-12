@@ -60,12 +60,7 @@ function attentionWhere(thresholds: { courier: string; limit: number }[]): SQL {
 		: undefined;
 	return or(
 		isNotNull(s.conflictNote),
-		and(
-			isNull(s.orderName),
-			isNull(s.orderId),
-			notInArray(s.matchStatus, ['excluded', 'manual']),
-			sql`${s.status} != 'cancelled'`
-		),
+		and(eq(s.matchStatus, 'unmatched'), sql`${s.status} != 'cancelled'`),
 		outlier
 	)!;
 }
@@ -105,8 +100,8 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		.select({
 			courier: s.courier,
 			inTransit: sql<number>`sum(case when ${s.status} in ('booked','in_transit') then 1 else 0 end)`,
-			unsettled: sql<number>`sum(case when ${s.status} in ('delivered','returned') and ${s.statementId} is null then ${s.netPayable} else 0 end)`,
-			unsettledCount: sql<number>`sum(case when ${s.status} in ('delivered','returned') and ${s.statementId} is null then 1 else 0 end)`,
+			unsettled: sql<number>`sum(case when ${s.status} in ('delivered','returned') and ${s.statementId} is null and ${s.settledAt} is null then ${s.netPayable} else 0 end)`,
+			unsettledCount: sql<number>`sum(case when ${s.status} in ('delivered','returned') and ${s.statementId} is null and ${s.settledAt} is null then 1 else 0 end)`,
 			total: sql<number>`count(*)`
 		})
 		.from(s)
@@ -216,5 +211,58 @@ export const actions: Actions = {
 			return fail(400, { error: `Could not read the file: ${e instanceof Error ? e.message : e}` });
 		}
 		redirect(303, `/couriers/import/${id}?m=${url.searchParams.get('m') ?? ''}`);
+	},
+
+	/** Manually attach a parcel to a Shopify order (e.g. split order "1326-2", typo in ref). */
+	link: async ({ request }) => {
+		const f = await request.formData();
+		const id = String(f.get('shipmentId') ?? '');
+		const name = String(f.get('orderName') ?? '')
+			.trim()
+			.replace(/^#/, '');
+		const order = await db.query.orders.findFirst({ where: eq(schema.orders.name, name) });
+		if (!order)
+			return fail(400, { error: `Order #${name} not found in Shopify data. Sync Shopify first?` });
+		await db
+			.update(s)
+			.set({
+				orderId: order.id,
+				orderName: order.name,
+				matchStatus: 'manual',
+				updatedAt: new Date().toISOString()
+			})
+			.where(eq(s.id, id));
+		await db
+			.insert(schema.shipmentChanges)
+			.values({
+				shipmentId: id,
+				source: 'manual',
+				diff: JSON.stringify({ order: [null, order.name] })
+			});
+		return { saved: `Parcel linked to #${order.name}.` };
+	},
+
+	/** Not a sale we account for (pre-Shopify, sample, personal parcel…). */
+	exclude: async ({ request }) => {
+		const id = String((await request.formData()).get('shipmentId') ?? '');
+		await db
+			.update(s)
+			.set({ matchStatus: 'excluded', updatedAt: new Date().toISOString() })
+			.where(eq(s.id, id));
+		await db
+			.insert(schema.shipmentChanges)
+			.values({
+				shipmentId: id,
+				source: 'manual',
+				diff: JSON.stringify({ matchStatus: [null, 'excluded'] })
+			});
+		return { saved: 'Parcel excluded from the books.' };
+	},
+
+	/** Mark a conflict as reviewed (keeps the existing data). */
+	resolve: async ({ request }) => {
+		const id = String((await request.formData()).get('shipmentId') ?? '');
+		await db.update(s).set({ conflictNote: null }).where(eq(s.id, id));
+		return { saved: 'Conflict marked as reviewed.' };
 	}
 };

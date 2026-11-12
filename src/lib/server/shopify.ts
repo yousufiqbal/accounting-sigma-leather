@@ -72,6 +72,21 @@ export async function shopifyGql<T>(
 	variables: Record<string, unknown> = {}
 ): Promise<T> {
 	if (!shopifyConfigured()) throw new Error('Shopify is not configured');
+	// Retry on rate limiting (Shopify returns THROTTLED when the query-cost bucket is empty).
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await gqlOnce<T>(query, variables);
+		} catch (e) {
+			if (attempt < 6 && e instanceof Error && /THROTTLED|Throttled|HTTP 429/.test(e.message)) {
+				await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+				continue;
+			}
+			throw e;
+		}
+	}
+}
+
+async function gqlOnce<T>(query: string, variables: Record<string, unknown>): Promise<T> {
 	const token = await getAccessToken();
 	const res = await fetch(
 		`https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json`,
@@ -83,9 +98,14 @@ export async function shopifyGql<T>(
 	);
 	if (res.status === 401) memoryToken = null; // force refresh next time
 	if (!res.ok) throw new Error(`Shopify HTTP ${res.status}`);
-	const body = (await res.json()) as { data?: T; errors?: { message: string }[] };
+	const body = (await res.json()) as {
+		data?: T;
+		errors?: { message: string; extensions?: { code?: string } }[];
+	};
 	if (body.errors?.length)
-		throw new Error(`Shopify: ${body.errors.map((e) => e.message).join('; ')}`);
+		throw new Error(
+			`Shopify: ${body.errors.map((e) => `${e.extensions?.code ?? ''} ${e.message}`.trim()).join('; ')}`
+		);
 	return body.data as T;
 }
 

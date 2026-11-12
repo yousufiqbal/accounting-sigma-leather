@@ -1,3 +1,6 @@
 {
-	"crons": [{ "path": "/api/cron/postex", "schedule": "0 21 * * *" }]
+	"crons": [
+		{ "path": "/api/cron/shopify", "schedule": "30 20 * * *" },
+		{ "path": "/api/cron/postex", "schedule": "0 21 * * *" }
+	]
 }

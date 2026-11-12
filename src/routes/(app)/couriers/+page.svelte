@@ -177,6 +177,14 @@
 				: ''}
 		</div>
 	{/if}
+	{#if form && 'saved' in form && form.saved}
+		<div
+			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
+			role="status"
+		>
+			{form.saved}
+		</div>
+	{/if}
 	{#if form?.synced}
 		<div
 			class="rounded-lg border border-success/30 bg-success-soft p-3 text-sm text-success"
@@ -306,7 +314,34 @@
 									<span class="font-medium">#{p.orderName}</span>
 									{#if p.extraParcel}<StatusBadge tone="muted" label="extra parcel" />{/if}
 								{:else}
-									<StatusBadge status="unmatched" label={p.orderRefRaw ?? 'no order'} />
+									<StatusBadge
+										status={p.matchStatus === 'excluded' ? 'excluded' : 'unmatched'}
+										label={`${p.orderRefRaw ?? 'no order'}${p.matchStatus === 'excluded' ? ' · excluded' : ''}`}
+									/>
+								{/if}
+								{#if p.matchStatus === 'unmatched' && p.status !== 'cancelled'}
+									<form
+										method="POST"
+										action="?/link"
+										use:enhance
+										class="mt-1 flex items-center gap-1"
+									>
+										<input type="hidden" name="shipmentId" value={p.id} />
+										<Input
+											name="orderName"
+											placeholder="#order"
+											class="h-7 w-20 text-xs"
+											required
+										/>
+										<Button type="submit" size="xs" variant="outline">Link</Button>
+										<Button
+											type="submit"
+											size="xs"
+											variant="ghost"
+											formaction="?/exclude"
+											formnovalidate>Exclude</Button
+										>
+									</form>
 								{/if}
 							</Table.Cell>
 							<Table.Cell>
@@ -321,6 +356,10 @@
 								<StatusBadge status={p.status} />
 								{#if p.conflictNote}
 									<div class="mt-1 max-w-64 text-xs text-danger">{p.conflictNote}</div>
+									<form method="POST" action="?/resolve" use:enhance>
+										<input type="hidden" name="shipmentId" value={p.id} />
+										<Button type="submit" size="xs" variant="ghost">Mark reviewed</Button>
+									</form>
 								{/if}
 							</Table.Cell>
 							<Table.Cell class="text-sm">{fmtDate(p.finalAt)}</Table.Cell>

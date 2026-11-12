@@ -172,7 +172,9 @@ export function parseDex(grid: Grid): ParsedFile {
 				);
 
 			const ext = one(r, 'externalOrder');
-			const [orderName, shopifyId] = ext.split('_');
+			// "2409_8385904935104_140": first part is the Shopify order number. The middle number
+			// is NOT the Shopify order id, so linking happens by order number.
+			const [orderName] = ext.split('_');
 			const weight =
 				one(r, 'billingWeight')
 					.split(/\s*-\s*/)
@@ -184,7 +186,6 @@ export function parseDex(grid: Grid): ParsedFile {
 				originalTrackingNo: one(r, 'originalTracking') || null,
 				orderRefRaw: ext || null,
 				orderName: /^\d+$/.test(orderName ?? '') ? orderName : null,
-				orderId: /^\d+$/.test(shopifyId ?? '') ? shopifyId : null,
 				extraParcel: false,
 				status: isReturned ? 'returned' : 'delivered',
 				courierStatus: finalStatus,

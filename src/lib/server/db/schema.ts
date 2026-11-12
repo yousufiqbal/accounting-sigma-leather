@@ -45,6 +45,7 @@ export const variants = sqliteTable(
 			.default('none'),
 		estCnPriceMinor: integer('est_cn_price_minor'), // for opening estimate, e.g. RMB fen
 		estCurrency: text('est_currency'),
+		shopifyCost: integer('shopify_cost_paisa'), // "cost per item" currently set in Shopify
 		shopifyOnHand: integer('shopify_on_hand'),
 		shopifySyncedAt: text('shopify_synced_at'),
 		updatedAt: text('updated_at')
@@ -138,12 +139,21 @@ export const orders = sqliteTable(
 		fulfillmentStatus: text('fulfillment_status'),
 		gateways: text('gateways'), // json array
 		isPrepaid: integer('is_prepaid', { mode: 'boolean' }).notNull().default(false),
+		/** Σ original unit price × current qty (before any discount). */
+		grossSales: money('gross_sales_paisa'),
+		/** Shopify current subtotal (after line discounts, before shipping). */
 		subtotal: money('subtotal_paisa'),
-		totalDiscounts: money('total_discounts_paisa'),
-		prepaidDiscount: money('prepaid_discount_paisa'),
-		shippingCharged: money('shipping_charged_paisa'),
-		total: money('total_paisa'),
-		discountCodes: text('discount_codes'), // json
+		totalDiscounts: money('total_discounts_paisa'), // line-item discounts (prepaid + other)
+		prepaidDiscount: money('prepaid_discount_paisa'), // the 5% advance-payment discount
+		shippingCharged: money('shipping_charged_paisa'), // after shipping discounts
+		total: money('total_paisa'), // current total (after edits/removals)
+		refunded: money('refunded_paisa'),
+		outstanding: money('outstanding_paisa'), // still to collect (COD part)
+		discountCodes: text('discount_codes'), // json [{kind,label,value,amount}]
+		tags: text('tags'), // json array
+		fulfilledAt: text('fulfilled_at'),
+		test: integer('test', { mode: 'boolean' }).notNull().default(false),
+		shopifyUpdatedAt: text('shopify_updated_at'),
 		updatedAt: text('updated_at')
 	},
 	(t) => [uniqueIndex('orders_name_idx').on(t.name), index('orders_created_idx').on(t.createdAt)]
@@ -155,8 +165,9 @@ export const orderLines = sqliteTable(
 		id: text('id').primaryKey(), // shopify line item id
 		orderId: text('order_id').notNull(),
 		variantId: text('variant_id'),
+		sku: text('sku'),
 		title: text('title').notNull(),
-		qty: integer('qty').notNull(),
+		qty: integer('qty').notNull(), // current quantity (after edits/removals)
 		unitPrice: money('unit_price_paisa'),
 		lineDiscount: money('line_discount_paisa'),
 		costSnapshot: integer('cost_snapshot_paisa'), // avg cost at fulfillment
