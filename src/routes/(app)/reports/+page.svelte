@@ -41,6 +41,9 @@
 		{ label: 'Marketing', value: -p.expenses.marketingTotal, kind: 'sub' },
 		...p.expenses.operating.map((e) => ({ label: e.category, value: -e.amount, indent: true })),
 		{ label: 'Operating expenses', value: -p.expenses.operatingTotal, kind: 'sub' },
+		...(p.writeOffs.amount
+			? [{ label: p.writeOffs.amount > 0 ? 'Inventory write-offs' : 'Inventory gains (recount)', value: -p.writeOffs.amount, kind: 'sub' as const }]
+			: []),
 		{ label: p.netProfit >= 0 ? 'Net profit' : 'Net loss', value: p.netProfit, kind: 'grand', hint: formatPct(p.kpi.netMargin) }
 	]);
 
@@ -82,6 +85,15 @@
 				{#if p.courier.estimated}{p.courier.estimated} parcels with estimated courier fees/tax (statement not in yet).{/if}
 				{#if p.cogs.estimated}Product costs partly estimated ({formatRs(p.cogs.estimated)}).{/if}
 				{#if p.cogs.unitsNoCost}<a href="/inventory" class="underline">{p.cogs.unitsNoCost} units sold have no cost</a> — profit is overstated.{/if}
+			</span>
+		</div>
+	{/if}
+	{#if p.writeOffs.pending}
+		<div class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning">
+			<Info class="mt-0.5 size-4 shrink-0" />
+			<span>
+				{p.writeOffs.pending} stock changes made in Shopify this month have no reason yet.
+				<a href="/inventory" class="underline">Review them</a> — damaged/missing items reduce profit.
 			</span>
 		</div>
 	{/if}

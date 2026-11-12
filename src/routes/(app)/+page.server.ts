@@ -25,7 +25,7 @@ export const load: PageServerLoad = async ({ parent }) => {
 			netSales: p.sales.net,
 			grossProfit: p.grossProfit,
 			courier: p.courier.total,
-			expenses: p.expenses.marketingTotal + p.expenses.operatingTotal,
+			expenses: p.expenses.marketingTotal + p.expenses.operatingTotal + p.writeOffs.amount,
 			netProfit: p.netProfit,
 			orders: p.kpi.orders
 		})),

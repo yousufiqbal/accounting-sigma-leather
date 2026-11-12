@@ -12,3 +12,6 @@ export const GET: RequestHandler = async ({ request }) => {
 		error(401, 'Unauthorized');
 	return json(await syncPostex('recent'));
 };
+
+/** Vercel: syncs can take minutes. */
+export const config = { maxDuration: 300 };

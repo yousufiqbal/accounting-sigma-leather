@@ -24,6 +24,14 @@
 
 	let edits = $state<Record<string, Edit>>({});
 	let busy = $state<string | null>(null);
+	let picked = $state<string[]>([]);
+	const REASONS = [
+		{ id: 'returned', label: 'Returned to stock', cost: false },
+		{ id: 'damaged', label: 'Damaged', cost: true },
+		{ id: 'missing', label: 'Missing / lost', cost: true },
+		{ id: 'count', label: 'Count fix', cost: true },
+		{ id: 'ignore', label: 'Ignore', cost: false }
+	] as const;
 
 	const dirty = $derived(Object.keys(edits).length);
 	const fxRs = $derived(data.rates.rmbFx / 10_000);
@@ -171,17 +179,78 @@
 	{/if}
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-		<Stat label="Stock value (at cost)" hint="Shopify on-hand × cost used">
+		<Stat label="Total stock value (at cost)" hint="Warehouse + couriers + on the way">
+			{formatRs(Number(s.value) + Number(data.elsewhere.withCourier.value) + data.elsewhere.onTheWay.value)}
+		</Stat>
+		<Stat label="In warehouse" hint="{Number(s.units).toLocaleString('en-PK')} units · Shopify on-hand × cost">
 			{formatRs(Number(s.value))}
 		</Stat>
-		<Stat label="Units on hand">{Number(s.units).toLocaleString('en-PK')}</Stat>
-		<Stat label="In stock with no cost" hint="{Number(s.missingUnits).toLocaleString('en-PK')} units not valued">
-			<span class={s.missing ? 'text-danger' : ''}>{s.missing} variants</span>
+		<Stat label="With couriers" hint="{Number(data.elsewhere.withCourier.units)} units in parcels not yet delivered/returned">
+			{formatRs(Number(data.elsewhere.withCourier.value))}
 		</Stat>
-		<Stat label="Value that is estimated" hint="Not yet from a landed import">
-			{s.value ? formatPct(Number(s.estimatedValue) / Number(s.value)) : '—'}
+		<Stat label="On the way from China" hint="{data.elsewhere.onTheWay.units} units in paid imports">
+			{formatRs(data.elsewhere.onTheWay.value)}
 		</Stat>
 	</div>
+	<div class="-mt-3 flex flex-wrap gap-x-6 gap-y-1 text-sm text-muted-foreground">
+		<span class={s.missing ? 'text-danger' : ''}>
+			{s.missing} in-stock variants have no cost ({Number(s.missingUnits).toLocaleString('en-PK')} units not valued)
+		</span>
+		<span>{s.value ? formatPct(Number(s.estimatedValue) / Number(s.value)) : '—'} of warehouse value is estimated</span>
+	</div>
+
+	{#if data.changes.length || data.lastStockCheck}
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Stock changes made in Shopify {#if data.changes.length}<StatusBadge tone="warning" label="{data.changes.length} to review" />{/if}</Card.Title>
+				<Card.Description>
+					Changes not explained by orders — returns put back, damaged or missing items, recounts. Damaged,
+					missing and count fixes go to the income statement as inventory write-offs (qty × cost).
+					{#if data.lastStockCheck}Last check {new Date(data.lastStockCheck).toLocaleString('en-GB', { timeZone: 'Asia/Karachi' })}.{/if}
+				</Card.Description>
+			</Card.Header>
+			{#if data.changes.length}
+				<form method="POST" action="?/classify" use:enhance={act('classify', () => (picked = []))}>
+					<Card.Content class="flex flex-wrap items-center gap-2 border-y bg-muted/40 py-2">
+						<span class="text-sm text-muted-foreground">{picked.length} selected</span>
+						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty > 0).map((c) => c.id))}>Select all +</Button>
+						<Button type="button" size="xs" variant="ghost" onclick={() => (picked = data.changes.filter((c) => c.qty < 0).map((c) => c.id))}>Select all −</Button>
+						<span class="ml-auto flex flex-wrap gap-1">
+							{#each REASONS as r (r.id)}
+								<Button type="submit" name="reason" value={r.id} size="xs" variant={r.cost ? 'outline' : 'secondary'} disabled={!picked.length || !!busy}>{r.label}</Button>
+							{/each}
+						</span>
+					</Card.Content>
+					<Card.Content class="max-h-[28rem] overflow-auto px-0">
+						<Table.Root>
+							<Table.Body>
+								{#each data.changes as c (c.id)}
+									<Table.Row>
+										<Table.Cell class="w-8 pl-6">
+											<input type="checkbox" name="id" value={c.id} bind:group={picked} aria-label="Select" />
+										</Table.Cell>
+										<Table.Cell class="text-sm text-muted-foreground">
+											{new Date(c.at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Karachi' })}
+										</Table.Cell>
+										<Table.Cell class="max-w-72">
+											<div class="truncate">{c.productTitle ?? 'Deleted product'}</div>
+											<div class="truncate text-xs text-muted-foreground">{c.variantTitle ?? ''}{c.variantTitle && c.sku ? ' · ' : ''}{c.sku ?? ''}</div>
+										</Table.Cell>
+										<Table.Cell class={['num text-right font-medium', c.qty < 0 ? 'text-danger' : 'text-success']}>
+											{c.qty > 0 ? '+' : ''}{c.qty}
+										</Table.Cell>
+										<Table.Cell class="pr-6 text-right"><Money paisa={c.qty * c.unitCost} muted /></Table.Cell>
+									</Table.Row>
+								{/each}
+							</Table.Body>
+						</Table.Root>
+					</Card.Content>
+				</form>
+			{:else}
+				<Card.Content><p class="text-sm text-muted-foreground">Nothing to review.</p></Card.Content>
+			{/if}
+		</Card.Root>
+	{/if}
 
 	<div class="grid gap-4 lg:grid-cols-2">
 		<Card.Root>

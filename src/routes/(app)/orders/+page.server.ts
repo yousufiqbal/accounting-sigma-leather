@@ -3,7 +3,7 @@ import { and, desc, eq, gte, isNull, like, lt, or, sql, type SQL } from 'drizzle
 import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { toPaisa } from '#lib/money.js';
-import { syncOrders, syncVariants } from '#lib/server/shopify-sync.js';
+import { syncOrders, syncStock } from '#lib/server/shopify-sync.js';
 import { applyAssumptions, previewAssumptions } from '#lib/server/assumptions.js';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -130,9 +130,12 @@ export const actions: Actions = {
 	sync: async ({ request }) => {
 		const mode = (await request.formData()).get('mode') === 'full' ? 'full' : 'recent';
 		try {
-			const variants = mode === 'full' ? await syncVariants() : null;
+			if (mode === 'full') {
+				const r = await syncStock('full');
+				return { synced: { ...r, variants: r.variants } };
+			}
 			const orders = await syncOrders(mode);
-			return { synced: { ...orders, variants: variants?.variants ?? null } };
+			return { synced: { ...orders, variants: null } };
 		} catch (e) {
 			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
 		}
@@ -177,3 +180,6 @@ export const actions: Actions = {
 		return { saved: `#${order.name} marked ${status} (${how}).` };
 	}
 };
+
+/** Vercel: syncs can take minutes. */
+export const config = { maxDuration: 300 };

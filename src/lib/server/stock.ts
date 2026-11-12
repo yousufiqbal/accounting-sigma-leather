@@ -275,3 +275,99 @@ export async function landBatch(id: string, landedOn: string) {
 	await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
 	return { items: plan.length, units: b.totals.units, costFailed: costFailed.length };
 }
+
+// ─── Shopify stock check (SPEC.md §5) ──────────────────────────────────────────
+
+export const VARIANCE_REASONS = ['returned', 'damaged', 'missing', 'count', 'ignore'] as const;
+export type VarianceReason = (typeof VARIANCE_REASONS)[number];
+/** Reasons that cost money (go to "Inventory write-offs"). */
+export const WRITE_OFF_REASONS: VarianceReason[] = ['damaged', 'missing', 'count'];
+
+/**
+ * Compare Shopify on-hand before/after a sync. Changes not explained by orders fulfilled
+ * in (lastCheck, anchor] land in the stock-changes inbox (type "variance", reason null).
+ * `anchor` = when the orders sync that preceded this started.
+ */
+export async function recordStockChanges(
+	before: Map<string, number | null>,
+	after: Map<string, number>,
+	anchor: string
+) {
+	const { getSetting, setSetting } = await import('./settings.js');
+	const last = await getSetting<string>('stock_checked_at');
+	await setSetting('stock_checked_at', anchor);
+	if (!last) return { baseline: true, changes: 0 };
+
+	const shipped = (await db.all(sql`
+		select l.variant_id as id, sum(l.qty) as qty
+		from order_lines l join orders o on o.id = l.order_id
+		where o.fulfilled_at > ${last} and o.fulfilled_at <= ${anchor}
+			and o.cancelled_at is null and o.test = 0 and l.variant_id is not null
+		group by l.variant_id`)) as { id: string; qty: number }[];
+	const shippedBy = new Map(shipped.map((s) => [s.id, s.qty]));
+
+	const costs = new Map(
+		(await db.select({ id: v.id, avgCost: v.avgCost }).from(v)).map((x) => [x.id, x.avgCost])
+	);
+	const rows = [];
+	for (const [id, now] of after) {
+		const was = before.get(id);
+		if (was === undefined || was === null) continue; // new variant
+		const unexplained = now - was + (shippedBy.get(id) ?? 0);
+		if (unexplained === 0) continue;
+		rows.push({
+			variantId: id,
+			at: anchor,
+			qtyDelta: unexplained,
+			type: 'variance' as const,
+			unitCost: costs.get(id) ?? 0,
+			refType: 'shopify_check',
+			refId: `${last}..${anchor}`
+		});
+	}
+	for (let i = 0; i < rows.length; i += 100)
+		await db.insert(schema.stockMovements).values(rows.slice(i, i + 100));
+	return { baseline: false, changes: rows.length };
+}
+
+export async function classifyStockChanges(ids: string[], reason: VarianceReason) {
+	if (!ids.length) return 0;
+	const r = await db
+		.update(schema.stockMovements)
+		.set({ reason })
+		.where(
+			and(
+				inArray(schema.stockMovements.id, ids),
+				eq(schema.stockMovements.type, 'variance')
+			)
+		)
+		.returning({ id: schema.stockMovements.id });
+	return r.length;
+}
+
+/** Value of goods out of the warehouse but not final yet, and paid imports not landed. */
+export async function stockElsewhere() {
+	const [withCourier] = (await db.all(sql`
+		select coalesce(sum(l.qty * coalesce(l.cost_snapshot_paisa, v.avg_cost_paisa, 0)), 0) as value,
+			coalesce(sum(l.qty), 0) as units
+		from order_lines l
+		left join variants v on v.id = l.variant_id
+		where l.order_id in (
+			select order_id from shipments
+			where status in ('booked', 'in_transit') and order_id is not null and match_status != 'excluded'
+		) and l.qty > 0`)) as { value: number; units: number }[];
+	const paid = await db
+		.select({ id: schema.importBatches.id })
+		.from(schema.importBatches)
+		.where(eq(schema.importBatches.status, 'paid'));
+	let onTheWay = 0,
+		onTheWayUnits = 0;
+	for (const b of paid) {
+		const x = await loadBatch(b.id);
+		if (x) {
+			onTheWay += x.totals.landed;
+			onTheWayUnits += x.totals.units;
+		}
+	}
+	return { withCourier, onTheWay: { value: onTheWay, units: onTheWayUnits } };
+}

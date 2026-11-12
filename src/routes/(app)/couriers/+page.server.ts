@@ -262,3 +262,6 @@ export const actions: Actions = {
 		return { saved: 'Conflict marked as reviewed.' };
 	}
 };
+
+/** Vercel: syncs can take minutes. */
+export const config = { maxDuration: 300 };

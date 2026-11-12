@@ -8,6 +8,7 @@ import { gidId, shopifyGql } from './shopify.js';
 import { toPaisa } from '../money.js';
 import { getSetting, setSetting } from './settings.js';
 import { recomputeCosts } from './costing.js';
+import { recordStockChanges } from './stock.js';
 
 type Money = { shopMoney: { amount: string } };
 const amt = (m: Money | null | undefined) => toPaisa(m?.shopMoney.amount ?? 0);
@@ -59,11 +60,21 @@ const toGrams = (w: { unit: string; value: number } | null | undefined) => {
 	return Math.round(w.value * f);
 };
 
-export function syncVariants() {
+/**
+ * Pull all variants. Pass `stockAnchor` (time the preceding orders sync started) to also
+ * record unexplained on-hand changes — callers must sync orders first. See `syncStock`.
+ */
+export function syncVariants(stockAnchor?: string) {
 	return logRun('shopify_variants', async () => {
 		let after: string | null = null;
 		let count = 0;
 		const now = new Date().toISOString();
+		const before = new Map(
+			(await db.select({ id: schema.variants.id, onHand: schema.variants.shopifyOnHand }).from(schema.variants)).map(
+				(r) => [r.id, r.onHand]
+			)
+		);
+		const afterOnHand = new Map<string, number>();
 		do {
 			const d: {
 				productVariants: {
@@ -93,6 +104,7 @@ export function syncVariants() {
 					(s, l) => s + (l.quantities[0]?.quantity ?? 0),
 					0
 				);
+				afterOnHand.set(gidId(v.id), onHand);
 				const values = {
 					id: gidId(v.id),
 					productId: gidId(v.product.id),
@@ -119,8 +131,17 @@ export function syncVariants() {
 			after = d.productVariants.pageInfo.hasNextPage ? d.productVariants.pageInfo.endCursor : null;
 		} while (after);
 		await recomputeCosts(); // weights / Shopify costs may have changed
-		return { variants: count };
+		const stock = await recordStockChanges(before, afterOnHand, stockAnchor ?? now);
+		return { variants: count, stockChanges: stock.changes };
 	});
+}
+
+/** Orders first (so fulfilments explain stock drops), then variants + stock check. */
+export async function syncStock(ordersMode: 'recent' | 'full' = 'recent') {
+	const anchor = new Date().toISOString();
+	const orders = await syncOrders(ordersMode);
+	const variants = await syncVariants(anchor);
+	return { ...orders, ...variants };
 }
 
 // ─── Orders ────────────────────────────────────────────────────────────────────

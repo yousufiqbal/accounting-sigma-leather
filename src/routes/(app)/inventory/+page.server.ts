@@ -1,12 +1,18 @@
 import { fail } from '@sveltejs/kit';
-import { and, asc, desc, eq, gt, like, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import { getRates, saveCostInputs, setRates, stockSummary } from '#lib/server/costing.js';
 import { parseCsv, parseXlsx } from '#lib/server/couriers/sheets.js';
 import { headerKey } from '#lib/server/couriers/util.js';
-import { syncVariants } from '#lib/server/shopify-sync.js';
-import { recordOpeningStock } from '#lib/server/stock.js';
+import { syncStock } from '#lib/server/shopify-sync.js';
+import {
+	classifyStockChanges,
+	recordOpeningStock,
+	stockElsewhere,
+	VARIANCE_REASONS,
+	type VarianceReason
+} from '#lib/server/stock.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 100;
@@ -72,7 +78,28 @@ export const load: PageServerLoad = async ({ url }) => {
 		.from(schema.stockMovements)
 		.where(eq(schema.stockMovements.type, 'opening'));
 
+	const sm = schema.stockMovements;
+	const changes = await db
+		.select({
+			id: sm.id,
+			at: sm.at,
+			qty: sm.qtyDelta,
+			unitCost: sm.unitCost,
+			productTitle: v.productTitle,
+			variantTitle: v.variantTitle,
+			sku: v.sku
+		})
+		.from(sm)
+		.leftJoin(v, eq(v.id, sm.variantId))
+		.where(and(eq(sm.type, 'variance'), isNull(sm.reason)))
+		.orderBy(desc(sm.at), asc(v.productTitle))
+		.limit(300);
+	const lastCheck = await db.query.settings.findFirst({ where: eq(schema.settings.key, 'stock_checked_at') });
+
 	return {
+		changes,
+		lastStockCheck: lastCheck ? (JSON.parse(lastCheck.value) as string) : null,
+		elsewhere: await stockElsewhere(),
 		view,
 		q,
 		page,
@@ -210,11 +237,23 @@ export const actions: Actions = {
 
 	refresh: async () => {
 		try {
-			const r = await syncVariants();
-			return { saved: `Pulled ${r.variants} variants from Shopify (weights, stock, costs).` };
+			const r = await syncStock('recent');
+			return {
+				saved: `Pulled ${r.orders} changed orders and ${r.variants} variants from Shopify.${r.stockChanges ? ` ${r.stockChanges} stock changes need a reason.` : ''}`
+			};
 		} catch (e) {
 			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
 		}
+	},
+
+	/** Give a reason to one or many Shopify stock changes. */
+	classify: async ({ request }) => {
+		const f = await request.formData();
+		const reason = String(f.get('reason')) as VarianceReason;
+		if (!VARIANCE_REASONS.includes(reason)) return fail(400, { error: 'Pick a reason.' });
+		const ids = f.getAll('id').map(String).filter(Boolean);
+		const n = await classifyStockChanges(ids, reason);
+		return { saved: `${n} stock change${n === 1 ? '' : 's'} marked “${reason}”.` };
 	},
 
 	opening: async () => {
@@ -226,3 +265,6 @@ export const actions: Actions = {
 		}
 	}
 };
+
+/** Vercel: syncs can take minutes. */
+export const config = { maxDuration: 300 };

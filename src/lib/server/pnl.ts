@@ -146,7 +146,16 @@ export async function incomeStatement(month: string) {
 	const marketingTotal = marketing.reduce((s, e) => s + e.amount, 0);
 	const operatingTotal = operating.reduce((s, e) => s + e.amount, 0);
 
-	const netProfit = grossProfit - courierTotal - marketingTotal - operatingTotal;
+	// ── Stock write-offs (damaged / missing / count fixes from Shopify stock checks) ──
+	const [wo] = (await db.all(sql`
+		select
+			coalesce(sum(case when m.reason in ('damaged', 'missing', 'count')
+				then -m.qty_delta * coalesce(nullif(m.unit_cost_paisa, 0), v.avg_cost_paisa, 0) else 0 end), 0) as amount,
+			coalesce(sum(case when m.reason is null then 1 else 0 end), 0) as pending
+		from stock_movements m left join variants v on v.id = m.variant_id
+		where m.type = 'variance' and m.at >= ${start} and m.at < ${end}`)) as { amount: number; pending: number }[];
+
+	const netProfit = grossProfit - courierTotal - marketingTotal - operatingTotal - wo.amount;
 
 	const lock = await db.query.monthLocks.findFirst({ where: eq(schema.monthLocks.month, month) });
 	const provisional = c.estimated > 0 || cogsEstimated > 0 || unitsNoCost > 0;
@@ -160,6 +169,7 @@ export async function incomeStatement(month: string) {
 		grossProfit,
 		courier: { ...c, total: courierTotal },
 		expenses: { marketing, operating, marketingTotal, operatingTotal },
+		writeOffs: { amount: wo.amount, pending: wo.pending },
 		netProfit,
 		kpi: {
 			orders: orders.length,
