@@ -13,7 +13,7 @@ export const nav = [
 	{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 	{ href: '/reports', label: 'Reports', icon: ChartColumn },
 	{ href: '/orders', label: 'Orders', icon: ShoppingCart },
-	{ href: '/couriers', label: 'Couriers', icon: Truck },
+	{ href: '/couriers', label: 'Couriers', icon: Truck, badge: 'couriers' },
 	{ href: '/inventory', label: 'Inventory', icon: Boxes, badge: 'inventory' },
 	{ href: '/pricing', label: 'Pricing', icon: Tag },
 	{ href: '/purchases', label: 'Purchases', icon: PackagePlus },
