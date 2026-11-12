@@ -185,3 +185,46 @@ export async function stockSummary() {
 		.where(eq(v.status, 'ACTIVE')); // draft/archived = leftovers, not valued
 	return s;
 }
+
+/**
+ * Set product weights (grams) in Shopify, then locally, then recompute those costs.
+ * Shopify stays the single source of truth for weight (store shipping + dispatcher use it).
+ */
+export async function pushWeights(items: { id: string; weightG: number }[]) {
+	if (!items.length) return { done: 0, failed: 0 };
+	const { shopifyGql } = await import('./shopify.js');
+	const rows = await db
+		.select({ id: v.id, inv: v.inventoryItemId })
+		.from(v)
+		.where(inArray(v.id, items.map((i) => i.id)));
+	const invOf = new Map(rows.map((r) => [r.id, r.inv]));
+	const ok: { id: string; weightG: number }[] = [];
+	let failed = 0;
+	for (let i = 0; i < items.length; i += 25) {
+		const chunk = items.slice(i, i + 25).filter((x) => invOf.get(x.id));
+		failed += items.slice(i, i + 25).length - chunk.length;
+		if (!chunk.length) continue;
+		const body = chunk
+			.map(
+				(c, j) =>
+					`m${j}: inventoryItemUpdate(id: "gid://shopify/InventoryItem/${invOf.get(c.id)}", input: { measurement: { weight: { unit: GRAMS, value: ${Math.max(0, Math.round(c.weightG))} } } }) { userErrors { message } }`
+			)
+			.join('\n');
+		const d = await shopifyGql<Record<string, { userErrors: { message: string }[] }>>(`mutation { ${body} }`).catch(
+			() => null
+		);
+		chunk.forEach((c, j) => {
+			if (d && !d[`m${j}`]?.userErrors.length) ok.push(c);
+			else failed++;
+		});
+	}
+	const now = new Date().toISOString();
+	for (let i = 0; i < ok.length; i += 100) {
+		const stmts = ok
+			.slice(i, i + 100)
+			.map((c) => db.update(v).set({ weightG: Math.round(c.weightG), updatedAt: now }).where(eq(v.id, c.id)));
+		await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
+	}
+	if (ok.length) await recomputeCosts(ok.map((c) => c.id));
+	return { done: ok.length, failed };
+}

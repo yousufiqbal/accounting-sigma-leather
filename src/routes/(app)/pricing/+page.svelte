@@ -216,7 +216,7 @@
 								{#if r.cost > 0}
 									<Money paisa={r.cost} />
 									{#if r.costSource !== 'batch'}<div class="text-xs text-muted-foreground">estimated</div>{/if}
-								{:else}<a href="/inventory?q={encodeURIComponent(r.sku ?? r.productTitle)}" class="text-sm text-danger underline">add cost</a>{/if}
+								{:else}<a href="/inventory/opening?view=all&q={encodeURIComponent(r.sku ?? r.productTitle)}" class="text-sm text-danger underline">add cost</a>{/if}
 							</Table.Cell>
 							<Table.Cell class="num text-right">
 								{r.sold || '—'}
