@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
 	import { ask, notice } from '#lib/confirm.svelte.js';
+	import Thumb from '#lib/components/app/thumb.svelte';
+	import VariantPicker from '#lib/components/app/variant-picker.svelte';
 	import { enhance } from '$app/forms';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
@@ -32,6 +34,7 @@
 	let edits = $state<Record<string, Edit>>({});
 	let busy = $state<string | null>(null);
 	let showPaste = $state(false);
+	let pickedVariant = $state('');
 	const dirty = $derived(Object.keys(edits).length);
 
 	const original = (l: Line): Edit => ({
@@ -222,13 +225,10 @@
 		</Card.Header>
 		{#if !locked}
 			<Card.Content class="grid gap-3">
-				<form method="POST" action={formAction('add')} use:enhance={act('add')} class="flex flex-wrap items-end gap-2">
+				<form method="POST" action={formAction('add')} use:enhance={act('add', () => (pickedVariant = ''))} class="flex flex-wrap items-end gap-2">
 					<div class="grid min-w-72 flex-1 gap-1.5">
-						<Label for="variant">Product</Label>
-						<Input id="variant" name="variant" list="variant-options" placeholder="Type name or SKU…" autocomplete="off" />
-						<datalist id="variant-options">
-							{#each data.options as o (o.id)}<option value="{o.label} [{o.id}]"></option>{/each}
-						</datalist>
+						<Label for="variant-picker">Product</Label>
+						<VariantPicker options={data.options} bind:value={pickedVariant} />
 					</div>
 					<div class="grid gap-1.5">
 						<Label for="qty">Qty</Label>
@@ -273,10 +273,15 @@
 					{#each data.lines as l (l.id)}
 						{@const e = cur(l)}
 						<Table.Row class={edits[l.id] ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-72 pl-6">
-								<div class="truncate font-medium">{l.variant?.productTitle ?? 'Deleted product'}</div>
-								<div class="truncate text-xs text-muted-foreground">
-									{l.variant?.variantTitle ?? ''}{l.variant?.variantTitle && l.variant?.sku ? ' · ' : ''}{l.variant?.sku ?? ''}
+							<Table.Cell class="max-w-80 pl-6">
+								<div class="flex items-center gap-3">
+									<Thumb src={l.variant?.imageUrl} alt={`${l.variant?.productTitle ?? ''} ${l.variant?.variantTitle ?? ''}`} />
+									<div class="min-w-0">
+										<div class="truncate font-medium">{l.variant?.productTitle ?? 'Deleted product'}</div>
+										<div class="truncate text-xs text-muted-foreground">
+											{l.variant?.variantTitle ?? ''}{l.variant?.variantTitle && l.variant?.sku ? ' · ' : ''}{l.variant?.sku ?? ''}
+										</div>
+									</div>
 								</div>
 							</Table.Cell>
 							{#if locked}

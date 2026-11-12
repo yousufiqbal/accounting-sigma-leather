@@ -20,14 +20,15 @@ export const load: PageServerLoad = async ({ params }) => {
 					sku: v.sku,
 					onHand: v.shopifyOnHand,
 					avgCost: v.avgCost,
-					costSource: v.costSource
+					costSource: v.costSource,
+					imageUrl: v.imageUrl
 				})
 				.from(v)
 				.where(inArray(v.id, b.lines.map((l) => l.variantId)))
 		: [];
 	const byId = new Map(vars.map((x) => [x.id, x]));
 	const options = await db
-		.select({ id: v.id, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku })
+		.select({ id: v.id, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, imageUrl: v.imageUrl, status: v.status })
 		.from(v)
 		.orderBy(asc(v.productTitle), asc(v.variantTitle));
 	return {
@@ -42,10 +43,10 @@ export const load: PageServerLoad = async ({ params }) => {
 					`${c.variant?.productTitle}${c.variant?.variantTitle}`
 				)
 			),
-		options: options.map((o) => ({
-			id: o.id,
-			label: `${o.productTitle}${o.variantTitle ? ` — ${o.variantTitle}` : ''}${o.sku ? ` (${o.sku})` : ''}`
-		}))
+		// Active products first; archived/draft still findable.
+		options: options
+			.sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE'))
+			.map((o) => ({ id: o.id, title: o.productTitle, variant: o.variantTitle, sku: o.sku, image: o.imageUrl }))
 	};
 };
 
@@ -142,7 +143,7 @@ export const actions: Actions = {
 	add: async ({ params, request }) => {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		const f = await request.formData();
-		const id = /\[(\d+)\]\s*$/.exec(String(f.get('variant') ?? ''))?.[1];
+		const id = String(f.get('variantId') ?? '').trim() || undefined;
 		const qty = Math.trunc(Number(f.get('qty')));
 		if (!id) return fail(400, { error: 'Pick a product from the list.' });
 		if (!(qty > 0)) return fail(400, { error: 'Quantity must be more than 0.' });

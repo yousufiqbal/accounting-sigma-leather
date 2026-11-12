@@ -14,6 +14,7 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Money from '#lib/components/app/money.svelte';
+	import Thumb from '#lib/components/app/thumb.svelte';
 	import Stat from '#lib/components/app/stat.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
 	import { formatPct, formatRs } from '#lib/money.js';
@@ -259,9 +260,14 @@
 										<Table.Cell class="text-sm text-muted-foreground">
 											{new Date(c.at).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', timeZone: 'Asia/Karachi' })}
 										</Table.Cell>
-										<Table.Cell class="max-w-72">
-											<div class="truncate">{c.productTitle ?? 'Deleted product'}</div>
-											<div class="truncate text-xs text-muted-foreground">{c.variantTitle ?? ''}{c.variantTitle && c.sku ? ' · ' : ''}{c.sku ?? ''}</div>
+										<Table.Cell class="max-w-80">
+											<div class="flex items-center gap-3">
+												<Thumb src={c.imageUrl} alt={`${c.productTitle ?? ''} ${c.variantTitle ?? ''}`} size={32} />
+												<div class="min-w-0">
+													<div class="truncate">{c.productTitle ?? 'Deleted product'}</div>
+													<div class="truncate text-xs text-muted-foreground">{c.variantTitle ?? ''}{c.variantTitle && c.sku ? ' · ' : ''}{c.sku ?? ''}</div>
+												</div>
+											</div>
 										</Table.Cell>
 										<Table.Cell class={['num text-right font-medium', c.qty < 0 ? 'text-danger' : 'text-success']}>
 											{c.qty > 0 ? '+' : ''}{c.qty}
@@ -401,13 +407,18 @@
 						{@const e = cur(r)}
 						{@const used = costUsed(r)}
 						<Table.Row class={[edits[r.id] && 'bg-warning-soft/40', r.status !== 'ACTIVE' && 'opacity-60']}>
-							<Table.Cell class="max-w-72 pl-6">
-								<div class={['truncate', firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground']}>
-									{r.productTitle}
-								</div>
-								<div class="truncate text-xs text-muted-foreground">
-									{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
-									{#if r.status !== 'ACTIVE'}· {r.status?.toLowerCase()}{/if}
+							<Table.Cell class="max-w-80 pl-6">
+								<div class="flex items-center gap-3">
+									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
+									<div class="min-w-0">
+										<div class={['truncate', firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground']}>
+											{r.productTitle}
+										</div>
+										<div class="truncate text-xs text-muted-foreground">
+											{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+											{#if r.status !== 'ACTIVE'}· {r.status?.toLowerCase()}{/if}
+										</div>
+									</div>
 								</div>
 							</Table.Cell>
 							<Table.Cell class="num text-right">{r.onHand ?? 0}</Table.Cell>

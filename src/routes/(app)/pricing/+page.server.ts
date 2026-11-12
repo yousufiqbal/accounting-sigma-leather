@@ -36,6 +36,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			id: v.id,
 			productId: v.productId,
 			productTitle: v.productTitle,
+			imageUrl: v.imageUrl,
 			variantTitle: v.variantTitle,
 			sku: v.sku,
 			price: v.price,

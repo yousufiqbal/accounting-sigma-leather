@@ -11,6 +11,7 @@
 	import * as DropdownMenu from '#lib/components/ui/dropdown-menu/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import ConfirmDialog from '#lib/components/app/confirm-dialog.svelte';
+	import Lightbox from '#lib/components/app/lightbox.svelte';
 	import { nav, settingsNav } from '#lib/nav.js';
 	import { currentMonth, monthLabel, shiftMonth } from '#lib/month.js';
 	import type { LayoutProps } from './$types';
@@ -44,6 +45,7 @@
 
 <form bind:this={logoutForm} method="POST" action="/logout" hidden></form>
 <ConfirmDialog />
+<Lightbox />
 
 <Sidebar.Provider>
 	<Sidebar.Root collapsible="icon">

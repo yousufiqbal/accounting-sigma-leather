@@ -11,6 +11,7 @@
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Money from '#lib/components/app/money.svelte';
+	import Thumb from '#lib/components/app/thumb.svelte';
 	import Stat from '#lib/components/app/stat.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
 	import { formatPct, formatRs } from '#lib/money.js';
@@ -210,9 +211,14 @@
 						{@const np = newPrice(r)}
 						{@const npProfit = np !== null && r.cost > 0 ? profitAt(np, r.cost) : null}
 						<Table.Row class={np !== null ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-72 pl-6">
-								<div class={['truncate', firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground']} title={r.productTitle}>{r.productTitle}</div>
-								<div class="truncate text-xs text-muted-foreground">{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}</div>
+							<Table.Cell class="max-w-80 pl-6">
+								<div class="flex items-center gap-3">
+									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
+									<div class="min-w-0">
+										<div class={['truncate', firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground']} title={r.productTitle}>{r.productTitle}</div>
+										<div class="truncate text-xs text-muted-foreground">{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}</div>
+									</div>
+								</div>
 							</Table.Cell>
 							<Table.Cell class="text-right">
 								{#if r.cost > 0}

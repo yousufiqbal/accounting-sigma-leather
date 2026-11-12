@@ -51,6 +51,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			id: v.id,
 			productId: v.productId,
 			productTitle: v.productTitle,
+			imageUrl: v.imageUrl,
 			variantTitle: v.variantTitle,
 			sku: v.sku,
 			status: v.status,
@@ -94,6 +95,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			qty: sm.qtyDelta,
 			unitCost: sm.unitCost,
 			productTitle: v.productTitle,
+			imageUrl: v.imageUrl,
 			variantTitle: v.variantTitle,
 			sku: v.sku
 		})

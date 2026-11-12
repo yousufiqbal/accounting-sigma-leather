@@ -46,7 +46,13 @@ type VariantNode = {
 	title: string;
 	sku: string | null;
 	price: string;
-	product: { id: string; title: string; status: string };
+	product: {
+		id: string;
+		title: string;
+		status: string;
+		featuredMedia: { preview: { image: { url: string } | null } | null } | null;
+	};
+	media: { nodes: { preview: { image: { url: string } | null } | null }[] };
 	inventoryItem: {
 		id: string;
 		unitCost: { amount: string } | null;
@@ -88,7 +94,8 @@ export function syncVariants(stockAnchor?: string) {
 						pageInfo { hasNextPage endCursor }
 						nodes {
 							id title sku price
-							product { id title status }
+							product { id title status featuredMedia { preview { image { url } } } }
+							media(first: 1) { nodes { preview { image { url } } } }
 							inventoryItem {
 								id
 								unitCost { amount }
@@ -115,6 +122,8 @@ export function syncVariants(stockAnchor?: string) {
 					inventoryItemId: gidId(v.inventoryItem.id),
 					status: v.product.status,
 					weightG: toGrams(v.inventoryItem.measurement?.weight),
+					imageUrl:
+						v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
 					price: toPaisa(v.price),
 					shopifyCost: v.inventoryItem.unitCost ? toPaisa(v.inventoryItem.unitCost.amount) : null,
 					shopifyOnHand: onHand,
