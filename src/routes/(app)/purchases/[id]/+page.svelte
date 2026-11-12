@@ -236,7 +236,7 @@
 					{#each data.lines as l (l.id)}
 						{@const e = cur(l)}
 						<Table.Row class={edits[l.id] ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-80 pl-6">
+							<Table.Cell class="max-w-64 pl-6">
 								<div class="flex items-center gap-3">
 									<Thumb src={l.variant?.imageUrl} alt={`${l.variant?.productTitle ?? ''} ${l.variant?.variantTitle ?? ''}`} />
 									<div class="min-w-0">
@@ -297,94 +297,91 @@
 		</Card.Content>
 	</Card.Root>
 
-	<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
-		<Card.Header>
-			<Card.Title>Shipment DDP</Card.Title>
-			<Card.Description>
-				Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split across
-				items by their weight (unit weight × qty), so cartons and packing are shared fairly. Other
-				costs below are split the same way.
-			</Card.Description>
-		</Card.Header>
-		<Card.Content class="grid gap-4">
-			<form method="POST" action={formAction('shipment')} use:enhance={act('shipment')} class="flex flex-wrap items-end gap-3">
-				<fieldset disabled={locked} class="contents">
-					<div class="grid gap-1.5">
-						<Label for="billedKg">Billed box weight (kg)</Label>
-						<Input id="billedKg" name="billedKg" inputmode="decimal" class="w-36" value={data.shipment.billedWeightG !== null ? data.shipment.billedWeightG / 1000 : ''} placeholder="e.g. 48.5" />
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="ddp">DDP Rs per kg</Label>
-						<Input id="ddp" name="ddp" inputmode="decimal" class="w-32" value={b.ddpRatePerKg / 100} />
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="ddpTotal">Invoice total Rs <span class="font-normal text-muted-foreground">(optional)</span></Label>
-						<Input id="ddpTotal" name="ddpTotal" inputmode="decimal" class="w-36" value={b.ddpTotal !== null ? b.ddpTotal / 100 : ''} placeholder={data.shipment.billedWeightG !== null ? String(Math.round((data.shipment.billedWeightG * b.ddpRatePerKg) / 100000)) : 'weight × rate'} />
-					</div>
-					{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>{busy === 'shipment' ? 'Saving…' : 'Save'}</Button>{/if}
-				</fieldset>
-			</form>
-			<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-				<div>
-					<span class="text-muted-foreground">DDP to split</span>
-					<div class="num font-medium">
-						{#if data.shipment.ddpTotal !== null}{formatRs(data.shipment.ddpTotal)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning">pending — showing estimate {formatRs(data.totals.ddp)}</span>{/if}
-					</div>
-				</div>
-				{#if data.shipment.overhead !== null}
+	<div class="grid gap-4 lg:grid-cols-2">
+		<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
+			<Card.Header>
+				<Card.Title>Shipment DDP</Card.Title>
+				<Card.Description>
+					Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split across
+					items by their weight (unit weight × qty), so cartons and packing are shared fairly.
+				</Card.Description>
+			</Card.Header>
+			<Card.Content class="grid gap-4">
+				<form method="POST" action={formAction('shipment')} use:enhance={act('shipment')} class="flex flex-wrap items-end gap-3">
+					<fieldset disabled={locked} class="contents">
+						<div class="grid gap-1.5">
+							<Label for="billedKg">Billed box weight (kg)</Label>
+							<Input id="billedKg" name="billedKg" inputmode="decimal" class="w-36" value={data.shipment.billedWeightG !== null ? data.shipment.billedWeightG / 1000 : ''} placeholder="e.g. 48.5" />
+						</div>
+						<div class="grid gap-1.5">
+							<Label for="ddp">DDP Rs per kg</Label>
+							<Input id="ddp" name="ddp" inputmode="decimal" class="w-32" value={b.ddpRatePerKg / 100} />
+						</div>
+						{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>{busy === 'shipment' ? 'Saving…' : 'Save'}</Button>{/if}
+					</fieldset>
+				</form>
+				<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
 					<div>
-						<span class="text-muted-foreground">Packing overhead</span>
-						<div class={['num font-medium', data.shipment.overhead < 0 ? 'text-danger' : '']}>
-							{data.shipment.overhead >= 0 ? '+' : ''}{(data.shipment.overhead * 100).toFixed(0)}%
-							<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span>
+						<span class="text-muted-foreground">DDP to split</span>
+						<div class="num font-medium">
+							{#if data.shipment.ddpTotal !== null}{formatRs(data.shipment.ddpTotal)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning">pending — showing estimate {formatRs(data.totals.ddp)}</span>{/if}
 						</div>
 					</div>
-				{/if}
-				{#if data.shipment.itemsWithoutWeight}
-					<div class="text-danger">{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.</div>
-				{/if}
-				{#if data.shipment.overhead !== null && data.shipment.overhead < 0}
-					<div class="text-danger">Billed weight is less than the items' weights — check the item weights.</div>
-				{/if}
-			</div>
-		</Card.Content>
-	</Card.Root>
-
-	<Card.Root>
-		<Card.Header>
-			<Card.Title>Other costs</Card.Title>
-			<Card.Description>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description>
-		</Card.Header>
-		<Card.Content class="grid gap-3">
-			{#each data.costs as c (c.id)}
-				<div class="flex items-center justify-between gap-2 text-sm">
-					<span>{c.type === 'local_cartage' ? 'Local cartage' : 'Other'}{c.note ? ` · ${c.note}` : ''}</span>
-					<span class="flex items-center gap-1">
-						<Money paisa={c.amount} />
-						{#if !locked}
-							<form method="POST" action={formAction('removeCost')} use:enhance={act('removeCost')}>
-								<input type="hidden" name="costId" value={c.id} />
-								<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
-							</form>
-						{/if}
-					</span>
+					{#if data.shipment.overhead !== null}
+						<div>
+							<span class="text-muted-foreground">Packing overhead</span>
+							<div class={['num font-medium', data.shipment.overhead < 0 ? 'text-danger' : '']}>
+								{data.shipment.overhead >= 0 ? '+' : ''}{(data.shipment.overhead * 100).toFixed(0)}%
+								<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span>
+							</div>
+						</div>
+					{/if}
+					{#if data.shipment.itemsWithoutWeight}
+						<div class="text-danger">{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.</div>
+					{/if}
+					{#if data.shipment.overhead !== null && data.shipment.overhead < 0}
+						<div class="text-danger">Billed weight is less than the items' weights — check the item weights.</div>
+					{/if}
 				</div>
-			{:else}
-				<p class="text-sm text-muted-foreground">None.</p>
-			{/each}
-			{#if !locked}
-				<form method="POST" action={formAction('addCost')} use:enhance={act('cost')} class="flex flex-wrap items-end gap-2">
-					<select name="type" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Type">
-						<option value="local_cartage">Local cartage</option>
-						<option value="other">Other</option>
-					</select>
-					<Input name="amount" inputmode="decimal" placeholder="Rs" class="w-28" aria-label="Amount" />
-					<Input name="note" placeholder="Note" class="w-40 flex-1" aria-label="Note" />
-					<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
-				</form>
-			{/if}
-		</Card.Content>
-	</Card.Root>
+			</Card.Content>
+		</Card.Root>
+
+		<Card.Root>
+			<Card.Header>
+				<Card.Title>Other costs</Card.Title>
+				<Card.Description>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description>
+			</Card.Header>
+			<Card.Content class="grid gap-3">
+				{#each data.costs as c (c.id)}
+					<div class="flex items-center justify-between gap-2 text-sm">
+						<span>{c.type === 'local_cartage' ? 'Local cartage' : 'Other'}{c.note ? ` · ${c.note}` : ''}</span>
+						<span class="flex items-center gap-1">
+							<Money paisa={c.amount} />
+							{#if !locked}
+								<form method="POST" action={formAction('removeCost')} use:enhance={act('removeCost')}>
+									<input type="hidden" name="costId" value={c.id} />
+									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
+								</form>
+							{/if}
+						</span>
+					</div>
+				{:else}
+					<p class="text-sm text-muted-foreground">None.</p>
+				{/each}
+				{#if !locked}
+					<form method="POST" action={formAction('addCost')} use:enhance={act('cost')} class="flex flex-wrap items-end gap-2">
+						<select name="type" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Type">
+							<option value="local_cartage">Local cartage</option>
+							<option value="other">Other</option>
+						</select>
+						<Input name="amount" inputmode="decimal" placeholder="Rs" class="w-28" aria-label="Amount" />
+						<Input name="note" placeholder="Note" class="w-40 flex-1" aria-label="Note" />
+						<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
+					</form>
+				{/if}
+			</Card.Content>
+		</Card.Root>
+	</div>
 
 	{#if !locked}
 		<form

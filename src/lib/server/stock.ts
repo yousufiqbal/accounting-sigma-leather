@@ -60,7 +60,7 @@ type Cost = typeof schema.batchCosts.$inferSelect;
 /**
  * Landed cost per piece:
  *   goods  = unit price × FX (PKR: as-is)
- *   DDP    = shipment DDP (billed box weight × rate/kg, or the invoice total) split by
+ *   DDP    = shipment DDP (billed box weight × rate/kg) split by
  *            item weight share (unit weight × qty); before the box weight is known it is
  *            estimated as unit weight × rate and the purchase is "DDP pending"
  *   extra  = other shipment costs, also split by weight (by value if no item has a weight)
@@ -70,8 +70,7 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 	const itemWeight = items.reduce((t, it) => t + it.unitWeightG * it.qty, 0);
 	const goodsTotal = items.reduce((t, it) => t + goodsCost(it.unitPriceForeignMinor, batch.currency, fx) * it.qty, 0);
 	const billed = batch.billedWeightG ?? null;
-	const ddpTotal =
-		batch.ddpTotal ?? (billed !== null ? Math.round((billed * batch.ddpRatePerKg) / 1000) : null);
+	const ddpTotal = billed !== null ? Math.round((billed * batch.ddpRatePerKg) / 1000) : null;
 	const ddpPending = ddpTotal === null && batch.ddpRatePerKg > 0;
 	const extraTotal = costs.reduce((t, c) => t + c.amount, 0);
 

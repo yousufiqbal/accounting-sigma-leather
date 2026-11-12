@@ -110,7 +110,7 @@ export const actions: Actions = {
 		return { saved: 'Saved.' };
 	},
 
-	/** Shipment DDP: billed box weight (kg) × rate, or the invoice total. */
+	/** Shipment DDP: billed box weight (kg) × rate. */
 	shipment: async ({ params, request }) => {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		const f = await request.formData();
@@ -121,23 +121,22 @@ export const actions: Actions = {
 			if (!Number.isFinite(n) || n < 0) throw new Error(k);
 			return n;
 		};
-		let kg: number | null, rate: number | null, total: number | null;
+		let kg: number | null, rate: number | null;
 		try {
 			kg = num('billedKg');
 			rate = num('ddp');
-			total = num('ddpTotal');
 		} catch {
-			return fail(400, { error: 'Weight, rate and total must be numbers.' });
+			return fail(400, { error: 'Weight and rate must be numbers.' });
 		}
 		await db
 			.update(schema.importBatches)
 			.set({
 				billedWeightG: kg === null ? null : Math.round(kg * 1000),
 				ddpRatePerKg: Math.round((rate ?? 0) * 100),
-				ddpTotal: total === null ? null : Math.round(total * 100)
+				ddpTotal: null
 			})
 			.where(eq(schema.importBatches.id, params.id));
-		return { saved: kg === null && total === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.' };
+		return { saved: kg === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.' };
 	},
 
 	add: async ({ params, request }) => {
