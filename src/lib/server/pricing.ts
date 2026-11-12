@@ -1,0 +1,186 @@
+/**
+ * Pricing: true profit per unit and suggested prices.
+ *
+ * Selling costs come from the last WINDOW_DAYS of delivered orders (by delivery date):
+ *   % of price  — courier withholding (ITWH+STWH), 5% advance discount, other discounts
+ *   Rs per order — courier delivery + return fees, packaging, minus shipping charged
+ * Ads and fixed costs (salaries, rent…) are deliberately left out (owner's choice).
+ *
+ * profit/unit = price × (1 − pct) − cost − perOrder / unitsPerOrder
+ * suggested   = round99((cost + perOrder / unitsPerOrder) / (1 − pct − target))
+ */
+import { eq, inArray, sql } from 'drizzle-orm';
+import { db, schema } from './db/index.js';
+import { getSetting, setSetting } from './settings.js';
+import { shopifyGql } from './shopify.js';
+
+export const WINDOW_DAYS = 90;
+
+export type SellingCosts = {
+	orders: number;
+	unitsPerOrder: number;
+	withholdingPct: number; // fraction of net sales
+	advancePct: number; // fraction of gross item sales
+	otherDiscountPct: number;
+	courierPerOrder: number; // paisa, delivery + returns (incl. tax)
+	packagingPerOrder: number; // paisa
+	shippingPerOrder: number; // paisa charged to customers (offsets courier)
+};
+
+export type PricingSettings = {
+	targetMargin: number; // fraction, e.g. 0.3
+	/** Owner overrides of computed costs (same keys as SellingCosts). */
+	overrides: Partial<Omit<SellingCosts, 'orders'>>;
+};
+
+export async function getPricingSettings(): Promise<PricingSettings> {
+	return (await getSetting<PricingSettings>('pricing')) ?? { targetMargin: 0.3, overrides: {} };
+}
+export async function setPricingSettings(p: PricingSettings) {
+	await setSetting('pricing', p);
+}
+
+export async function measuredCosts(): Promise<SellingCosts> {
+	const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
+	const sinceDate = since.slice(0, 10);
+	const [o] = (await db.all(sql`
+		with d as (
+			select order_id, min(final_at) as at from shipments
+			where status = 'delivered' and order_id is not null and match_status != 'excluded'
+			group by order_id
+		)
+		select count(*) as orders,
+			coalesce(sum(o.gross_sales_paisa), 0) as gross,
+			coalesce(sum(o.prepaid_discount_paisa), 0) as advance,
+			coalesce(sum(o.total_discounts_paisa - o.prepaid_discount_paisa), 0) as other,
+			coalesce(sum(o.shipping_charged_paisa), 0) as shipping,
+			coalesce(sum(o.total_paisa), 0) as net
+		from d join orders o on o.id = d.order_id
+		where d.at >= ${since} and o.cancelled_at is null and o.total_paisa > 0`)) as {
+		orders: number;
+		gross: number;
+		advance: number;
+		other: number;
+		shipping: number;
+		net: number;
+	}[];
+	const [c] = (await db.all(sql`
+		select
+			coalesce(sum(case when status = 'delivered' then fee_paisa + fee_tax_paisa + other_fees_paisa else 0 end), 0) as delivery,
+			coalesce(sum(case when status = 'returned' then fee_paisa + fee_tax_paisa + return_fee_paisa + return_fee_tax_paisa + other_fees_paisa else 0 end), 0) as returns,
+			coalesce(sum(case when status = 'delivered' then itwh_paisa + stwh_paisa else 0 end), 0) as withholding
+		from shipments
+		where final_at >= ${since} and status in ('delivered', 'returned') and match_status != 'excluded'`)) as {
+		delivery: number;
+		returns: number;
+		withholding: number;
+	}[];
+	const [p] = (await db.all(sql`
+		select coalesce(sum(e.amount_paisa), 0) as packaging
+		from expenses e join expense_categories c on c.id = e.category_id
+		where c.name = 'Packaging' and e.date >= ${sinceDate}`)) as { packaging: number }[];
+	// Median pieces per order: bulk orders (20 thread spools) would skew the mean upwards.
+	const per = (
+		(await db.all(sql`
+		with d as (
+			select order_id, min(final_at) as at from shipments
+			where status = 'delivered' and order_id is not null and match_status != 'excluded'
+			group by order_id
+		)
+		select (select sum(qty) from order_lines l where l.order_id = o.id and l.qty > 0) as units
+		from d join orders o on o.id = d.order_id
+		where d.at >= ${since} and o.cancelled_at is null and o.total_paisa > 0`)) as { units: number | null }[]
+	)
+		.map((r) => Number(r.units ?? 0))
+		.filter((u) => u > 0)
+		.sort((a, b) => a - b);
+	const medianUnits = per.length ? per[Math.floor(per.length / 2)] : 1;
+	const n = Math.max(1, o.orders);
+	return {
+		orders: o.orders,
+		unitsPerOrder: medianUnits,
+		withholdingPct: o.net ? c.withholding / o.net : 0.04,
+		advancePct: o.gross ? o.advance / o.gross : 0,
+		otherDiscountPct: o.gross ? o.other / o.gross : 0,
+		courierPerOrder: Math.round((c.delivery + c.returns) / n),
+		packagingPerOrder: Math.round(p.packaging / n),
+		shippingPerOrder: Math.round(o.shipping / n)
+	};
+}
+
+/** Measured costs with owner overrides applied, plus the two numbers the formula needs. */
+export function effective(m: SellingCosts, s: PricingSettings) {
+	const c = { ...m, ...s.overrides };
+	const pct = c.withholdingPct + c.advancePct + c.otherDiscountPct;
+	const perOrder = c.courierPerOrder + c.packagingPerOrder - c.shippingPerOrder;
+	const perUnit = Math.round(perOrder / Math.max(1, c.unitsPerOrder));
+	return { ...c, pct, perOrder, perUnit, target: s.targetMargin };
+}
+export type Effective = ReturnType<typeof effective>;
+
+/** Round up to a price ending in 99 (rupees): 1,234 → 1,299; 480 → 499. Paisa in/out. */
+export function round99(paisa: number) {
+	const rs = Math.ceil(paisa / 100);
+	return (Math.ceil((rs + 1) / 100) * 100 - 1) * 100;
+}
+
+export function profitPerUnit(price: number, cost: number, e: Effective) {
+	return Math.round(price * (1 - e.pct) - cost - e.perUnit);
+}
+
+export function suggestedPrice(cost: number, e: Effective): number | null {
+	const denom = 1 - e.pct - e.target;
+	if (cost <= 0 || denom <= 0.05) return null;
+	return round99((cost + e.perUnit) / denom);
+}
+
+// ─── Push to Shopify ───────────────────────────────────────────────────────────
+
+/** Set new prices in Shopify (grouped per product), then locally + price history. */
+export async function pushPrices(changes: { id: string; price: number }[]) {
+	const vars = await db
+		.select({ id: schema.variants.id, productId: schema.variants.productId, price: schema.variants.price, cost: schema.variants.avgCost })
+		.from(schema.variants)
+		.where(inArray(schema.variants.id, changes.map((c) => c.id)));
+	const byId = new Map(vars.map((v) => [v.id, v]));
+	const byProduct = new Map<string, { id: string; price: number }[]>();
+	for (const c of changes) {
+		const v = byId.get(c.id);
+		if (!v || c.price <= 0 || c.price === v.price) continue;
+		byProduct.set(v.productId, [...(byProduct.get(v.productId) ?? []), c]);
+	}
+	const done: string[] = [];
+	const failed: string[] = [];
+	const at = new Date().toISOString();
+	for (const [productId, list] of byProduct) {
+		const d = await shopifyGql<{
+			productVariantsBulkUpdate: { userErrors: { message: string }[] };
+		}>(
+			`mutation($p: ID!, $v: [ProductVariantsBulkInput!]!) {
+				productVariantsBulkUpdate(productId: $p, variants: $v) { userErrors { message } }
+			}`,
+			{
+				p: `gid://shopify/Product/${productId}`,
+				v: list.map((c) => ({ id: `gid://shopify/ProductVariant/${c.id}`, price: (c.price / 100).toFixed(2) }))
+			}
+		).catch((e) => ({ productVariantsBulkUpdate: { userErrors: [{ message: String(e) }] } }));
+		if (d.productVariantsBulkUpdate.userErrors.length) {
+			failed.push(...list.map((c) => c.id));
+			continue;
+		}
+		await db.batch(
+			list.flatMap((c) => [
+				db.update(schema.variants).set({ price: c.price, updatedAt: at }).where(eq(schema.variants.id, c.id)),
+				db.insert(schema.priceChanges).values({
+					variantId: c.id,
+					at,
+					oldPrice: byId.get(c.id)!.price,
+					newPrice: c.price,
+					costAtChange: byId.get(c.id)!.cost
+				})
+			]) as [never, ...never[]]
+		);
+		done.push(...list.map((c) => c.id));
+	}
+	return { done: done.length, failed: failed.length };
+}

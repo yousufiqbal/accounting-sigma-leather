@@ -60,6 +60,21 @@ export const variants = sqliteTable(
 	(t) => [index('variants_product_idx').on(t.productId), index('variants_sku_idx').on(t.sku)]
 );
 
+/** Prices changed from the Pricing page (pushed to Shopify). */
+export const priceChanges = sqliteTable(
+	'price_changes',
+	{
+		id: id(),
+		variantId: text('variant_id').notNull(),
+		at: text('at').notNull(),
+		oldPrice: money('old_price_paisa'),
+		newPrice: money('new_price_paisa'),
+		costAtChange: money('cost_paisa'),
+		createdAt: createdAt()
+	},
+	(t) => [index('price_changes_variant_idx').on(t.variantId)]
+);
+
 export const costHistory = sqliteTable('cost_history', {
 	id: id(),
 	variantId: text('variant_id').notNull(),

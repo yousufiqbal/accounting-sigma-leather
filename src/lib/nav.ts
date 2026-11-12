@@ -5,6 +5,7 @@ import Truck from '@lucide/svelte/icons/truck';
 import Boxes from '@lucide/svelte/icons/boxes';
 import PackagePlus from '@lucide/svelte/icons/package-plus';
 import Receipt from '@lucide/svelte/icons/receipt';
+import Tag from '@lucide/svelte/icons/tag';
 import Settings from '@lucide/svelte/icons/settings';
 
 /** `badge` = key into the layout's attention counts. */
@@ -14,6 +15,7 @@ export const nav = [
 	{ href: '/orders', label: 'Orders', icon: ShoppingCart },
 	{ href: '/couriers', label: 'Couriers', icon: Truck, badge: 'couriers' },
 	{ href: '/inventory', label: 'Inventory', icon: Boxes, badge: 'inventory' },
+	{ href: '/pricing', label: 'Pricing', icon: Tag },
 	{ href: '/purchases', label: 'Purchases', icon: PackagePlus },
 	{ href: '/expenses', label: 'Expenses', icon: Receipt }
 ] as const;
