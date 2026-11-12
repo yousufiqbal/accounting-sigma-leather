@@ -5,6 +5,7 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash from '@lucide/svelte/icons/trash-2';
 	import Lock from '@lucide/svelte/icons/lock';
+	import X from '@lucide/svelte/icons/x';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -48,7 +49,7 @@
 
 	function openForm(e: Expense | null, catId?: string) {
 		editing = e;
-		categoryId = e?.categoryId ?? catId ?? data.categories[0]?.id ?? '';
+		categoryId = e?.categoryId ?? catId ?? data.categories.find((c) => !c.archived)?.id ?? '';
 		inUsd = !!e?.usdCents || (!e && catById.get(categoryId)?.group === 'marketing');
 		usd = e?.usdCents ? String(e.usdCents / 100) : '';
 		rate = e?.fxRateX10000 ? String(e.fxRateX10000 / 10_000) : data.lastUsdRate ? String(data.lastUsdRate / 10_000) : '';
@@ -90,8 +91,8 @@
 		<Stat label="Operating">{formatRs(total - marketing)}</Stat>
 	</div>
 
-	<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-		{#each data.categories as c (c.id)}
+	<div class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+		{#each data.categories.filter((c) => !c.archived || totals.get(c.id)) as c (c.id)}
 			<button
 				type="button"
 				disabled={data.locked}
@@ -160,8 +161,24 @@
 	</Card.Root>
 
 	<details class="text-sm">
-		<summary class="cursor-pointer text-muted-foreground">Add a category</summary>
-		<form method="POST" action={formAction('addCategory')} use:enhance class="mt-2 flex flex-wrap items-end gap-2">
+		<summary class="cursor-pointer text-muted-foreground">Manage categories</summary>
+		<div class="mt-2 flex flex-wrap gap-2">
+			{#each data.categories.filter((c) => !c.archived) as c (c.id)}
+				<form
+					method="POST"
+					action={formAction('removeCategory')}
+					use:enhance={({ cancel }) => {
+						if (!confirm(`Remove category “${c.name}”? If it has expenses it is only hidden — past reports keep them.`)) cancel();
+					}}
+					class="inline-flex items-center gap-1 rounded-full border bg-card py-0.5 pr-0.5 pl-3"
+				>
+					<input type="hidden" name="id" value={c.id} />
+					<span>{c.name}</span>
+					<Button type="submit" size="icon-xs" variant="ghost" aria-label="Remove {c.name}" class="rounded-full"><X /></Button>
+				</form>
+			{/each}
+		</div>
+		<form method="POST" action={formAction('addCategory')} use:enhance class="mt-3 flex flex-wrap items-end gap-2">
 			<Input name="name" placeholder="Name" class="w-48" aria-label="Category name" />
 			<select name="group" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Group">
 				<option value="operating">Operating</option>
@@ -204,7 +221,7 @@
 			<div class="grid gap-2">
 				<Label for="categoryId">Category</Label>
 				<select id="categoryId" name="categoryId" bind:value={categoryId} class="h-9 rounded-md border bg-background px-2 text-sm">
-					{#each data.categories as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
+					{#each data.categories.filter((c) => !c.archived || c.id === editing?.categoryId) as c (c.id)}<option value={c.id}>{c.name}</option>{/each}
 				</select>
 			</div>
 			<label class="flex items-center gap-2 text-sm">

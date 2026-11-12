@@ -136,7 +136,25 @@ export const actions: Actions = {
 		const name = String(f.get('name') ?? '').trim();
 		if (!name) return fail(400, { error: 'Category needs a name.' });
 		const group = f.get('group') === 'marketing' ? 'marketing' : 'operating';
-		await db.insert(cat).values({ name, group }).onConflictDoNothing();
+		// Re-adding a removed (archived) category brings it back.
+		await db
+			.insert(cat)
+			.values({ name, group })
+			.onConflictDoUpdate({ target: cat.name, set: { archived: false, group } });
 		return { saved: `Category “${name}” added.` };
+	},
+
+	/** No expenses → delete. Has expenses → hide it (past months keep their numbers). */
+	removeCategory: async ({ request }) => {
+		const id = String((await request.formData()).get('id') ?? '');
+		const c = await db.query.expenseCategories.findFirst({ where: eq(cat.id, id) });
+		if (!c) return fail(404, { error: 'Category not found.' });
+		const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(exp).where(eq(exp.categoryId, id));
+		if (n === 0) {
+			await db.delete(cat).where(eq(cat.id, id));
+			return { saved: `Category “${c.name}” removed.` };
+		}
+		await db.update(cat).set({ archived: true }).where(eq(cat.id, id));
+		return { saved: `Category “${c.name}” hidden. Its ${n} past expense${n === 1 ? '' : 's'} stay in the reports.` };
 	}
 };
