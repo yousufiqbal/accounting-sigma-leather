@@ -4,6 +4,7 @@ import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { toPaisa } from '#lib/money.js';
 import { syncOrders, syncVariants } from '#lib/server/shopify-sync.js';
+import { applyAssumptions, previewAssumptions } from '#lib/server/assumptions.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 50;
@@ -97,6 +98,7 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		totalRows,
 		summary,
 		noCourierCount,
+		assume: view === 'nocourier' ? await previewAssumptions() : null,
 		lastSync: lastSync ? { at: lastSync.startedAt, ok: lastSync.ok } : null,
 		orders: rows.map((r) => ({
 			...r,
@@ -118,6 +120,13 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 };
 
 export const actions: Actions = {
+	assume: async () => {
+		const c = await applyAssumptions();
+		return {
+			saved: `Assumed delivered: ${c.prepaid} prepaid (TCS/other) · ${c.leopards} Leopards COD. ${c.review} left for review.`
+		};
+	},
+
 	sync: async ({ request }) => {
 		const mode = (await request.formData()).get('mode') === 'full' ? 'full' : 'recent';
 		try {

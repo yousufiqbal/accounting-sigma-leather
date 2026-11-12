@@ -232,13 +232,11 @@ export const actions: Actions = {
 				updatedAt: new Date().toISOString()
 			})
 			.where(eq(s.id, id));
-		await db
-			.insert(schema.shipmentChanges)
-			.values({
-				shipmentId: id,
-				source: 'manual',
-				diff: JSON.stringify({ order: [null, order.name] })
-			});
+		await db.insert(schema.shipmentChanges).values({
+			shipmentId: id,
+			source: 'manual',
+			diff: JSON.stringify({ order: [null, order.name] })
+		});
 		return { saved: `Parcel linked to #${order.name}.` };
 	},
 
@@ -249,13 +247,11 @@ export const actions: Actions = {
 			.update(s)
 			.set({ matchStatus: 'excluded', updatedAt: new Date().toISOString() })
 			.where(eq(s.id, id));
-		await db
-			.insert(schema.shipmentChanges)
-			.values({
-				shipmentId: id,
-				source: 'manual',
-				diff: JSON.stringify({ matchStatus: [null, 'excluded'] })
-			});
+		await db.insert(schema.shipmentChanges).values({
+			shipmentId: id,
+			source: 'manual',
+			diff: JSON.stringify({ matchStatus: [null, 'excluded'] })
+		});
 		return { saved: 'Parcel excluded from the books.' };
 	},
 
