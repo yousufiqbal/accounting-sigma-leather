@@ -23,6 +23,26 @@
 	let open = $state(false);
 	let active = $state(0);
 	let input = $state<HTMLInputElement>();
+	let box = $state<HTMLDivElement>();
+	/** Dropdown is fixed to the viewport so cards (overflow: hidden) can't clip it. */
+	let pos = $state({ top: 0, left: 0, width: 0, maxHeight: 320, up: false });
+	function place() {
+		if (!box) return;
+		const r = box.getBoundingClientRect();
+		const below = window.innerHeight - r.bottom - 8;
+		const above = r.top - 8;
+		const up = below < 220 && above > below;
+		pos = {
+			top: up ? r.top - 4 : r.bottom + 4,
+			left: r.left,
+			width: r.width,
+			maxHeight: Math.max(160, Math.min(320, up ? above : below)),
+			up
+		};
+	}
+	$effect(() => {
+		if (open) place();
+	});
 
 	const selected = $derived(options.find((o) => o.id === value) ?? null);
 	const label = (o: PickerOption) => `${o.title}${o.variant ? ` — ${o.variant}` : ''}`;
@@ -68,9 +88,11 @@
 	});
 </script>
 
+<svelte:window onresize={() => open && place()} onscrollcapture={() => open && place()} />
+
 <div class="relative">
 	<input type="hidden" {name} {value} />
-	<div class="flex items-center gap-2 rounded-md border bg-background pl-1.5 focus-within:ring-2 focus-within:ring-ring/50">
+	<div bind:this={box} class="flex items-center gap-2 rounded-md border bg-background pl-1.5 focus-within:ring-2 focus-within:ring-ring/50">
 		<Thumb src={selected?.image} alt={selected ? label(selected) : ''} size={26} zoom={false} />
 		<input
 			bind:this={input}
@@ -97,7 +119,12 @@
 		<ul
 			id="{id}-list"
 			role="listbox"
-			class="absolute z-30 mt-1 max-h-80 w-full overflow-auto rounded-md border bg-popover p-1 text-sm shadow-lg"
+			class="fixed z-50 overflow-auto rounded-md border bg-popover p-1 text-sm shadow-lg"
+			style:left="{pos.left}px"
+			style:width="{pos.width}px"
+			style:max-height="{pos.maxHeight}px"
+			style:top={pos.up ? null : `${pos.top}px`}
+			style:bottom={pos.up ? `${window.innerHeight - pos.top}px` : null}
 		>
 			{#each matches as o, i (o.id)}
 				<li role="option" aria-selected={i === active}>
@@ -118,6 +145,14 @@
 			{/each}
 		</ul>
 	{:else if open && query}
-		<div class="absolute z-30 mt-1 w-full rounded-md border bg-popover p-3 text-sm text-muted-foreground shadow-lg">No product matches “{query}”.</div>
+		<div
+			class="fixed z-50 rounded-md border bg-popover p-3 text-sm text-muted-foreground shadow-lg"
+			style:left="{pos.left}px"
+			style:width="{pos.width}px"
+			style:top={pos.up ? null : `${pos.top}px`}
+			style:bottom={pos.up ? `${window.innerHeight - pos.top}px` : null}
+		>
+			No product matches “{query}”.
+		</div>
 	{/if}
 </div>

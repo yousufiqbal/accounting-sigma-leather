@@ -40,7 +40,9 @@ export const load: PageServerLoad = async ({ url }) => {
 	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
 	const rates = await getRates();
-	const where_ = (k: View) => (k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
+	// Draft/archived products are leftovers (owner): never shown or valued.
+	const active = eq(v.status, 'ACTIVE');
+	const where_ = (k: View) => and(active, k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
 	const filters = [where_(view)];
 	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));
 	const where = and(...filters.filter(Boolean));

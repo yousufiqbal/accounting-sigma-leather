@@ -170,7 +170,7 @@ export async function saveCostInputs(
 	return recomputeCosts(inputs.map((i) => i.id));
 }
 
-/** Stock value summary from Shopify on-hand × cost used. */
+/** Stock value summary from Shopify on-hand × cost used (active products only). */
 export async function stockSummary() {
 	const [s] = await db
 		.select({
@@ -181,6 +181,7 @@ export async function stockSummary() {
 			missingUnits: sql<number>`coalesce(sum(case when ${v.shopifyOnHand} > 0 and ${v.avgCost} = 0 then ${v.shopifyOnHand} else 0 end), 0)`,
 			noWeight: sql<number>`coalesce(sum(case when ${v.status} = 'ACTIVE' and coalesce(${v.weightG}, 0) = 0 then 1 else 0 end), 0)`
 		})
-		.from(v);
+		.from(v)
+		.where(eq(v.status, 'ACTIVE')); // draft/archived = leftovers, not valued
 	return s;
 }

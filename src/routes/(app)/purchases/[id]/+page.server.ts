@@ -43,9 +43,9 @@ export const load: PageServerLoad = async ({ params }) => {
 					`${c.variant?.productTitle}${c.variant?.variantTitle}`
 				)
 			),
-		// Active products first; archived/draft still findable.
+		// Draft/archived products are leftovers — not offered.
 		options: options
-			.sort((a, b) => Number(b.status === 'ACTIVE') - Number(a.status === 'ACTIVE'))
+			.filter((o) => o.status === 'ACTIVE')
 			.map((o) => ({ id: o.id, title: o.productTitle, variant: o.variantTitle, sku: o.sku, image: o.imageUrl }))
 	};
 };

@@ -362,13 +362,14 @@ export async function recordStockChanges(
 		group by l.variant_id`)) as { id: string; qty: number }[];
 	const shippedBy = new Map(shipped.map((s) => [s.id, s.qty]));
 
-	const costs = new Map(
-		(await db.select({ id: v.id, avgCost: v.avgCost }).from(v)).map((x) => [x.id, x.avgCost])
-	);
+	const vrows = await db.select({ id: v.id, avgCost: v.avgCost, status: v.status }).from(v);
+	const costs = new Map(vrows.map((x) => [x.id, x.avgCost]));
+	const inactive = new Set(vrows.filter((x) => x.status !== 'ACTIVE').map((x) => x.id));
 	const rows = [];
 	for (const [id, now] of after) {
 		const was = before.get(id);
 		if (was === undefined || was === null) continue; // new variant
+		if (inactive.has(id)) continue; // draft/archived leftovers: not tracked
 		const unexplained = now - was + (shippedBy.get(id) ?? 0);
 		if (unexplained === 0) continue;
 		rows.push({
