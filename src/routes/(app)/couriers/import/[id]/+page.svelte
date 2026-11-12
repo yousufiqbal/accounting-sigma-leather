@@ -2,6 +2,7 @@
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
@@ -13,10 +14,17 @@
 	let { data, form }: PageProps = $props();
 	let busy = $state(false);
 	let show = $state<'changes' | 'all'>('changes');
+	let limit = $state(200);
+	let started = $state(0);
+	let now = $state(0);
+	let timer: ReturnType<typeof setInterval> | undefined;
+	const elapsed = $derived(busy ? Math.max(0, Math.round((now - started) / 1000)) : 0);
 
-	const visible = $derived(
+	const filtered = $derived(
 		show === 'all' ? data.rows : data.rows.filter((r) => r.kind !== 'unchanged')
 	);
+	/** Render in pages so a large file doesn't freeze the browser. */
+	const visible = $derived(filtered.slice(0, limit));
 	const MONEY_FIELDS = new Set([
 		'cod',
 		'fee',
@@ -55,26 +63,39 @@
 		</div>
 		<div class="flex gap-2">
 			<form method="POST" action={formAction('discard')} use:enhance>
-				<Button type="submit" variant="ghost">Discard</Button>
+				<Button type="submit" variant="ghost" disabled={busy}>Discard</Button>
 			</form>
 			<form
 				method="POST"
 				action={formAction('commit')}
 				use:enhance={() => {
 					busy = true;
+					started = now = Date.now();
+					timer = setInterval(() => (now = Date.now()), 1000);
 					return async ({ update }) => {
 						await update();
+						clearInterval(timer);
 						busy = false;
 					};
 				}}
 			>
 				<Button type="submit" disabled={blocked || busy}>
-					{busy ? 'Importing…' : nothingToDo ? 'Mark file as imported' : 'Import'}
+					{#if busy}<LoaderCircle class="animate-spin" /> Importing…{:else}{nothingToDo ? 'Mark file as imported' : 'Import'}{/if}
 				</Button>
 			</form>
 		</div>
 	</div>
 
+
+	{#if busy}
+		<div class="flex items-center gap-3 rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-info" role="status">
+			<LoaderCircle class="size-4 shrink-0 animate-spin" />
+			<span>
+				Importing {data.counts.new + data.counts.updated} parcel changes ({data.rows.length} rows checked), then linking
+				orders and updating deliveries… <b class="num">{elapsed}s</b>. Large files can take a minute — keep this tab open.
+			</span>
+		</div>
+	{/if}
 
 	{#if data.errors.length}
 		<div
@@ -114,12 +135,12 @@
 				<Button
 					size="sm"
 					variant={show === 'changes' ? 'secondary' : 'ghost'}
-					onclick={() => (show = 'changes')}>Changes only</Button
+					onclick={() => ((show = 'changes'), (limit = 200))}>Changes only</Button
 				>
 				<Button
 					size="sm"
 					variant={show === 'all' ? 'secondary' : 'ghost'}
-					onclick={() => (show = 'all')}>All rows</Button
+					onclick={() => ((show = 'all'), (limit = 200))}>All rows</Button
 				>
 			</div>
 		</Card.Header>
@@ -179,5 +200,11 @@
 				</Table.Body>
 			</Table.Root>
 		</Card.Content>
+		{#if filtered.length > visible.length}
+			<Card.Footer class="flex items-center justify-between text-sm text-muted-foreground">
+				<span>Showing {visible.length} of {filtered.length} rows</span>
+				<Button size="sm" variant="outline" onclick={() => (limit += 500)}>Show more</Button>
+			</Card.Footer>
+		{/if}
 	</Card.Root>
 </div>

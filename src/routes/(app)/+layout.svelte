@@ -14,6 +14,7 @@
 	import Lightbox from '#lib/components/app/lightbox.svelte';
 	import { toast } from 'svelte-sonner';
 	import { replaceState } from '$app/navigation';
+	import { untrack } from 'svelte';
 	import { nav, settingsNav } from '#lib/nav.js';
 	import { currentMonth, monthLabel, shiftMonth } from '#lib/month.js';
 	import type { LayoutProps } from './$types';
@@ -31,17 +32,23 @@
 		else if (typeof f.saved === 'string' && f.saved) toast.success(f.saved);
 	});
 
-	/** Courier file import redirects with ?imported=new-updated-same-conflicts. */
+	/**
+	 * Courier file import redirects with ?imported=new-updated-same-conflicts.
+	 * Toast once, then drop the param. Only page.url is tracked (reading page.state here
+	 * re-triggered the effect after replaceState → endless loop that froze the tab).
+	 */
+	let shownImport = '';
 	$effect(() => {
 		const imp = page.url.searchParams.get('imported');
-		if (!imp) return;
+		if (!imp || imp === shownImport) return;
+		shownImport = imp;
 		const [n, u, same, c] = imp.split('-').map(Number);
 		toast.success(
 			`File imported: ${n} new · ${u} updated · ${same} already up to date${c ? ` · ${c} conflicts (see Needs attention)` : ''}`
 		);
 		const url = new URL(page.url.href);
 		url.searchParams.delete('imported');
-		replaceState(url, page.state);
+		untrack(() => replaceState(url, {}));
 	});
 
 	/** Same path, different month — keeps the month picker global. */
