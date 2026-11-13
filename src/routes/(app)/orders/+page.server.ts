@@ -4,10 +4,12 @@ import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { toPaisa } from '#lib/money.js';
 import { syncOrders, syncStock } from '#lib/server/shopify-sync.js';
+import { orderProfits } from '#lib/server/order-profit.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 50;
-const VIEWS = ['month', 'nocourier', 'all'] as const;
+const VIEWS = ['profit', 'month', 'nocourier', 'all'] as const;
+const SORTS = ['recent', 'low', 'high'] as const;
 type View = (typeof VIEWS)[number];
 const o = schema.orders;
 
@@ -26,7 +28,10 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 	const { start, end } = monthBoundsUtc(month);
 	const view: View = (VIEWS as readonly string[]).includes(url.searchParams.get('view') ?? '')
 		? (url.searchParams.get('view') as View)
-		: 'month';
+		: 'profit';
+	const sort = (SORTS as readonly string[]).includes(url.searchParams.get('sort') ?? '')
+		? (url.searchParams.get('sort') as (typeof SORTS)[number])
+		: 'recent';
 	const q = url.searchParams.get('q')?.trim().replace(/^#/, '') ?? '';
 	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
@@ -44,6 +49,54 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		.select({ n: sql<number>`count(*)` })
 		.from(o)
 		.where(noCourierData);
+
+	const lastSync = await db.query.syncRuns.findFirst({
+		where: like(schema.syncRuns.kind, 'shopify_orders%'),
+		orderBy: desc(schema.syncRuns.startedAt)
+	});
+	const base = {
+		view,
+		q,
+		sort,
+		page,
+		summary,
+		noCourierCount,
+		lastSync: lastSync ? { at: lastSync.startedAt, ok: lastSync.ok } : null
+	};
+
+	if (view === 'profit') {
+		const all = await orderProfits(month);
+		const sum = (k: 'sales' | 'cogs' | 'courier' | 'tax' | 'profit') =>
+			all.reduce((s, r) => s + r[k], 0);
+		const returned = all.filter((r) => r.outcome === 'returned');
+		const totals = {
+			orders: all.length - returned.length,
+			returned: returned.length,
+			returnLoss: returned.reduce((s, r) => s + r.profit, 0),
+			losing: all.filter((r) => r.outcome === 'delivered' && r.profit < 0).length,
+			sales: sum('sales'),
+			cogs: sum('cogs'),
+			courier: sum('courier'),
+			tax: sum('tax'),
+			profit: sum('profit'),
+			estimated: all.some((r) => r.cogsEstimated || r.courierEstimated || r.unitsNoCost > 0)
+		};
+		const list = (q ? all.filter((r) => r.name.includes(q)) : all).sort((a, b) =>
+			sort === 'low'
+				? a.profit - b.profit
+				: sort === 'high'
+					? b.profit - a.profit
+					: b.at.localeCompare(a.at)
+		);
+		return {
+			...base,
+			pageCount: Math.max(1, Math.ceil(list.length / PAGE_SIZE)),
+			totalRows: list.length,
+			totals,
+			profits: list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+			orders: [] as never[]
+		};
+	}
 
 	const filters: SQL[] = [];
 	if (view === 'month') filters.push(inMonth);
@@ -84,20 +137,12 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		.limit(PAGE_SIZE)
 		.offset((page - 1) * PAGE_SIZE);
 
-	const lastSync = await db.query.syncRuns.findFirst({
-		where: like(schema.syncRuns.kind, 'shopify_orders%'),
-		orderBy: desc(schema.syncRuns.startedAt)
-	});
-
 	return {
-		view,
-		q,
-		page,
+		...base,
 		pageCount: Math.max(1, Math.ceil(totalRows / PAGE_SIZE)),
 		totalRows,
-		summary,
-		noCourierCount,
-		lastSync: lastSync ? { at: lastSync.startedAt, ok: lastSync.ok } : null,
+		totals: null,
+		profits: [],
 		orders: rows.map((r) => ({
 			...r,
 			tags: JSON.parse(r.tags ?? '[]') as string[],

@@ -53,7 +53,11 @@
 		open = true;
 	}
 
+	const pct = (r: number) => (Number.isFinite(r) ? `${Math.round(r * 100)}%` : '—');
+	const SORT_LABEL = { recent: 'Recent', low: 'Lowest profit', high: 'Highest profit' } as const;
+
 	const views = $derived([
+		{ id: 'profit', label: `Profit · ${monthLabel(data.month)}` },
 		{ id: 'month', label: `Placed in ${monthLabel(data.month)}` },
 		{ id: 'nocourier', label: `Waiting for courier data (${data.noCourierCount})` },
 		{ id: 'all', label: 'All' }
@@ -95,18 +99,35 @@
 		</form>
 	</div>
 
-
-	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-		<Stat label="Orders placed ({monthLabel(data.month)})">{data.summary.orders ?? 0}</Stat>
-		<Stat label="Cancelled">{data.summary.cancelled ?? 0}</Stat>
-		<Stat label="Prepaid (advance)">{data.summary.prepaid ?? 0}</Stat>
-		<Stat
-			label="Order value (not cancelled)"
-			hint="Booked, not yet revenue — revenue counts on delivery"
-		>
-			{formatRs(Number(data.summary.booked ?? 0))}
-		</Stat>
-	</div>
+	{#if data.totals}
+		{@const t = data.totals}
+		<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+			<Stat label="Delivered orders">{t.orders}</Stat>
+			<Stat label="Sales (incl. shipping)">{formatRs(t.sales)}</Stat>
+			<Stat
+				label="Order profit{t.estimated ? ' (est.)' : ''}"
+				hint="Sales − product cost − courier fees − courier tax. Ads, salaries and other expenses are on Reports."
+			>
+				<span class={t.profit < 0 ? 'text-danger' : ''}>{formatRs(t.profit)}</span>
+				<span class="text-sm font-normal text-muted-foreground">{pct(t.profit / t.sales)}</span>
+			</Stat>
+			<Stat label="Returns ({t.returned})" hint="Courier fees paid on parcels that came back">
+				<span class={t.returnLoss < 0 ? 'text-danger' : ''}>{formatRs(t.returnLoss)}</span>
+			</Stat>
+		</div>
+	{:else}
+		<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+			<Stat label="Orders placed ({monthLabel(data.month)})">{data.summary.orders ?? 0}</Stat>
+			<Stat label="Cancelled">{data.summary.cancelled ?? 0}</Stat>
+			<Stat label="Prepaid (advance)">{data.summary.prepaid ?? 0}</Stat>
+			<Stat
+				label="Order value (not cancelled)"
+				hint="Booked, not yet revenue — revenue counts on delivery"
+			>
+				{formatRs(Number(data.summary.booked ?? 0))}
+			</Stat>
+		</div>
+	{/if}
 
 	<Card.Root>
 		<Card.Header class="gap-3" data-sveltekit-noscroll>
@@ -125,7 +146,25 @@
 					<Input name="q" value={data.q} placeholder="Order #" class="h-8 w-36" />
 				</form>
 			</div>
-			{#if data.view === 'nocourier'}
+			{#if data.view === 'profit'}
+				<Card.Description>
+					Orders delivered or returned in {monthLabel(data.month)}. Profit = sales − product cost −
+					courier fees − courier tax.
+					{#if data.totals?.losing}<span class="text-danger"
+							>{data.totals.losing} delivered order{data.totals.losing === 1 ? '' : 's'} lost money.</span
+						>{/if}
+				</Card.Description>
+				<div class="flex items-center gap-1">
+					<span class="mr-1 text-xs text-muted-foreground">Sort</span>
+					{#each Object.entries(SORT_LABEL) as [k, label] (k)}
+						<Button
+							href={href({ sort: k === 'recent' ? null : k })}
+							size="xs"
+							variant={data.sort === k ? 'secondary' : 'ghost'}>{label}</Button
+						>
+					{/each}
+				</div>
+			{:else if data.view === 'nocourier'}
 				<Card.Description>
 					Shipped with a tracking number, but no PostEx/DEX data yet. Orders shipped without
 					tracking count as delivered right away; tracked ones are assumed delivered after 14 days
@@ -134,85 +173,163 @@
 			{/if}
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
-			<Table.Root>
-				<Table.Header>
-					<Table.Row>
-						<Table.Head class="pl-6">Order</Table.Head>
-						<Table.Head>Placed</Table.Head>
-						<Table.Head>Payment</Table.Head>
-						<Table.Head class="text-right">Items</Table.Head>
-						<Table.Head class="text-right">Discounts</Table.Head>
-						<Table.Head class="text-right">Shipping</Table.Head>
-						<Table.Head class="text-right">Total</Table.Head>
-						<Table.Head class="pr-6">Delivery</Table.Head>
-					</Table.Row>
-				</Table.Header>
-				<Table.Body>
-					{#each data.orders as ord (ord.id)}
-						<Table.Row class={ord.cancelledAt ? 'opacity-50' : ''}>
-							<Table.Cell class="pl-6">
-								<div class="font-medium">#{ord.name}</div>
-								<div class="flex flex-wrap gap-1">
-									{#each ord.tags.filter((t) => COURIER_TAGS.test(t)) as t (t)}
-										<StatusBadge tone="muted" label={t} />
-									{/each}
-								</div>
-							</Table.Cell>
-							<Table.Cell class="text-sm">{fmtDate(ord.createdAt)}</Table.Cell>
-							<Table.Cell>
-								{#if ord.cancelledAt}
-									<StatusBadge status="cancelled" />
-								{:else if ord.isPrepaid}
-									<StatusBadge
-										tone="success"
-										label={ord.outstanding > 0 ? 'part advance' : 'advance'}
-									/>
-								{:else}
-									<StatusBadge tone="muted" label="COD" />
-								{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right"><Money paisa={ord.grossSales} /></Table.Cell>
-							<Table.Cell class="text-right">
-								{#if ord.totalDiscounts}
-									<Money paisa={-ord.totalDiscounts} />
-									{#if ord.prepaidDiscount}<div class="text-xs text-muted-foreground">
-											5% advance
-										</div>{/if}
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right"><Money paisa={ord.shippingCharged} muted /></Table.Cell
-							>
-							<Table.Cell class="text-right font-medium"><Money paisa={ord.total} /></Table.Cell>
-							<Table.Cell class="pr-6">
-								{#each ord.parcels as p (p.trackingNo)}
-									<div class="flex items-center gap-1.5 text-xs">
-										<StatusBadge status={p.status} />
-										<span
-											>{COURIER_LABEL[p.courier]}{p.courier === 'manual' && p.label
-												? ` · ${p.label}`
-												: ''}</span
-										>
-										{#if p.finalAt}<span class="text-muted-foreground">{fmtDate(p.finalAt)}</span
-											>{/if}
-									</div>
-								{:else}
-									{#if !ord.cancelledAt && (ord.fulfillmentStatus === 'FULFILLED' || ord.fulfillmentStatus === 'PARTIALLY_FULFILLED')}
-										<Button size="xs" variant="outline" onclick={() => openManual(ord)}
-											>Record delivery</Button
-										>
-									{/if}
-								{/each}
-							</Table.Cell>
-						</Table.Row>
-					{:else}
+			{#if data.view === 'profit'}
+				<Table.Root>
+					<Table.Header>
 						<Table.Row>
-							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
-								No orders here. Run “Full sync” once to pull your Shopify history.
-							</Table.Cell>
+							<Table.Head class="pl-6">Order</Table.Head>
+							<Table.Head>Outcome</Table.Head>
+							<Table.Head class="text-right">Sales</Table.Head>
+							<Table.Head class="text-right">Product cost</Table.Head>
+							<Table.Head class="text-right">Courier fees</Table.Head>
+							<Table.Head class="text-right">Courier tax</Table.Head>
+							<Table.Head class="text-right">Profit</Table.Head>
+							<Table.Head class="pr-6 text-right">Margin</Table.Head>
 						</Table.Row>
-					{/each}
-				</Table.Body>
-			</Table.Root>
+					</Table.Header>
+					<Table.Body>
+						{#each data.profits as r (r.id)}
+							<Table.Row>
+								<Table.Cell class="pl-6">
+									<div class="font-medium">#{r.name}</div>
+									<div class="text-xs text-muted-foreground">
+										{r.isPrepaid ? 'Advance' : 'COD'}{r.courierOnly
+											? ' · cancelled in Shopify'
+											: ''}
+									</div>
+								</Table.Cell>
+								<Table.Cell>
+									<div class="flex items-center gap-1.5 text-xs">
+										<StatusBadge status={r.outcome} />
+										<span class="text-muted-foreground"
+											>{r.couriers
+												.split(',')
+												.map((c) => COURIER_LABEL[c] ?? c)
+												.join(' + ')} · {fmtDate(r.at)}</span
+										>
+									</div>
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									{#if r.outcome === 'delivered'}
+										<Money paisa={r.sales} />
+										{#if r.shipping}<div class="text-xs text-muted-foreground">
+												incl. {formatRs(r.shipping)} shipping
+											</div>{/if}
+									{:else}<span class="text-muted-foreground">—</span>{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									{#if r.outcome === 'delivered'}
+										<Money paisa={-r.cogs} muted />
+										{#if r.unitsNoCost}<div class="text-xs text-warning">
+												{r.unitsNoCost} unit{r.unitsNoCost === 1 ? '' : 's'} no cost
+											</div>{:else if r.cogsEstimated}<div class="text-xs text-muted-foreground">
+												est.
+											</div>{/if}
+									{:else}<span class="text-muted-foreground">—</span>{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									<Money paisa={-r.courier} muted />
+									{#if r.courierEstimated}<div class="text-xs text-muted-foreground">est.</div>{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right"><Money paisa={-r.tax} muted /></Table.Cell>
+								<Table.Cell class={['text-right font-medium', r.profit < 0 && 'text-danger']}>
+									{formatRs(r.profit)}
+								</Table.Cell>
+								<Table.Cell class="pr-6 text-right text-sm text-muted-foreground"
+									>{pct(r.margin)}</Table.Cell
+								>
+							</Table.Row>
+						{:else}
+							<Table.Row>
+								<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
+									No orders delivered or returned in {monthLabel(data.month)}.
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			{:else}
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head class="pl-6">Order</Table.Head>
+							<Table.Head>Placed</Table.Head>
+							<Table.Head>Payment</Table.Head>
+							<Table.Head class="text-right">Items</Table.Head>
+							<Table.Head class="text-right">Discounts</Table.Head>
+							<Table.Head class="text-right">Shipping</Table.Head>
+							<Table.Head class="text-right">Total</Table.Head>
+							<Table.Head class="pr-6">Delivery</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each data.orders as ord (ord.id)}
+							<Table.Row class={ord.cancelledAt ? 'opacity-50' : ''}>
+								<Table.Cell class="pl-6">
+									<div class="font-medium">#{ord.name}</div>
+									<div class="flex flex-wrap gap-1">
+										{#each ord.tags.filter((t) => COURIER_TAGS.test(t)) as t (t)}
+											<StatusBadge tone="muted" label={t} />
+										{/each}
+									</div>
+								</Table.Cell>
+								<Table.Cell class="text-sm">{fmtDate(ord.createdAt)}</Table.Cell>
+								<Table.Cell>
+									{#if ord.cancelledAt}
+										<StatusBadge status="cancelled" />
+									{:else if ord.isPrepaid}
+										<StatusBadge
+											tone="success"
+											label={ord.outstanding > 0 ? 'part advance' : 'advance'}
+										/>
+									{:else}
+										<StatusBadge tone="muted" label="COD" />
+									{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right"><Money paisa={ord.grossSales} /></Table.Cell>
+								<Table.Cell class="text-right">
+									{#if ord.totalDiscounts}
+										<Money paisa={-ord.totalDiscounts} />
+										{#if ord.prepaidDiscount}<div class="text-xs text-muted-foreground">
+												5% advance
+											</div>{/if}
+									{:else}<span class="text-muted-foreground">—</span>{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right"
+									><Money paisa={ord.shippingCharged} muted /></Table.Cell
+								>
+								<Table.Cell class="text-right font-medium"><Money paisa={ord.total} /></Table.Cell>
+								<Table.Cell class="pr-6">
+									{#each ord.parcels as p (p.trackingNo)}
+										<div class="flex items-center gap-1.5 text-xs">
+											<StatusBadge status={p.status} />
+											<span
+												>{COURIER_LABEL[p.courier]}{p.courier === 'manual' && p.label
+													? ` · ${p.label}`
+													: ''}</span
+											>
+											{#if p.finalAt}<span class="text-muted-foreground">{fmtDate(p.finalAt)}</span
+												>{/if}
+										</div>
+									{:else}
+										{#if !ord.cancelledAt && (ord.fulfillmentStatus === 'FULFILLED' || ord.fulfillmentStatus === 'PARTIALLY_FULFILLED')}
+											<Button size="xs" variant="outline" onclick={() => openManual(ord)}
+												>Record delivery</Button
+											>
+										{/if}
+									{/each}
+								</Table.Cell>
+							</Table.Row>
+						{:else}
+							<Table.Row>
+								<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
+									No orders here. Run “Full sync” once to pull your Shopify history.
+								</Table.Cell>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
+			{/if}
 		</Card.Content>
 		{#if data.pageCount > 1}
 			<Card.Footer class="flex items-center justify-between text-sm text-muted-foreground">
