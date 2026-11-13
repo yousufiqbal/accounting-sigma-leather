@@ -162,14 +162,13 @@
 				</form>
 			</div>
 			<div class="flex flex-wrap items-center justify-between gap-2">
-				<Card.Description>
-					Profit / pc = price − selling costs − cost. Each product's share of the per-order shipping
-					cost uses how many pieces its orders usually have. Green ≥ target, amber below, red
-					losing.
-					{#if data.view === 'nocost'}Add costs on the <a href="/inventory" class="underline"
-							>Inventory</a
-						> page first.{/if}
-				</Card.Description>
+				{#if data.view === 'nocost'}
+					<Card.Description>
+						Add costs on the <a href="/inventory" class="underline">Inventory</a> page first.
+					</Card.Description>
+				{:else}
+					<span></span>
+				{/if}
 				{#if data.rows.some((r) => r.suggested && r.suggested !== r.price)}
 					<Button size="sm" variant="outline" onclick={suggestAllOnPage}
 						><Wand /> Use suggested for this page</Button
