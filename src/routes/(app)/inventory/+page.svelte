@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { productGroups } from '#lib/group-rows.js';
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -20,6 +21,9 @@
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+	const groups = $derived(productGroups(data.rows));
+	const groupStock = (r: Row) =>
+		data.rows.filter((x) => x.productId === r.productId).reduce((n, x) => n + (x.onHand ?? 0), 0);
 	type Row = (typeof data.rows)[number];
 
 	let busy = $state<string | null>(null);
@@ -37,8 +41,6 @@
 	const reasonOf = (id: string | null) => REASONS.find((r) => r.id === id);
 
 	const SOURCE = COST_SOURCE;
-	const firstOfProduct = (r: Row, i: number) =>
-		i === 0 || data.rows[i - 1].productId !== r.productId;
 
 	function href(changes: Record<string, string | number | null>) {
 		const p = new URLSearchParams(page.url.searchParams.toString());
@@ -189,22 +191,37 @@
 				</Table.Header>
 				<Table.Body>
 					{#each data.rows as r, i (r.id)}
+						{#if groups[i].first && groups[i].grouped}
+							<Table.Row class="bg-muted/40 hover:bg-muted/40">
+								<Table.Cell colspan={5} class="py-2 pr-6 pl-6">
+									<div class="flex items-center gap-3">
+										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
+											>{r.productTitle}</span
+										>
+										<span class="text-xs text-muted-foreground">{groups[i].size} variants</span>
+										<span class="text-xs text-muted-foreground">· {groupStock(r)} on hand</span>
+									</div>
+								</Table.Cell>
+							</Table.Row>
+						{/if}
 						<Table.Row>
-							<Table.Cell class="max-w-96 pl-6">
+							<Table.Cell class={['max-w-96 pl-6', groups[i].grouped && 'pl-12']}>
 								<div class="flex items-center gap-3">
 									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
 									<div class="min-w-0">
-										<div
-											class={[
-												'truncate',
-												firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground'
-											]}
-										>
-											{r.productTitle}
-										</div>
-										<div class="truncate text-xs text-muted-foreground">
-											{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
-										</div>
+										{#if groups[i].grouped}
+											<div class="truncate">{r.variantTitle ?? 'Default'}</div>
+											{#if r.sku}<div class="truncate text-xs text-muted-foreground">
+													{r.sku}
+												</div>{/if}
+										{:else}
+											<div class="truncate font-medium" title={r.productTitle}>
+												{r.productTitle}
+											</div>
+											<div class="truncate text-xs text-muted-foreground">
+												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+											</div>
+										{/if}
 									</div>
 								</div>
 							</Table.Cell>

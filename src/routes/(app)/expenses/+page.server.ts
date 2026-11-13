@@ -2,6 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
+import { monthEnd, shiftMonth } from '#lib/month.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const cat = schema.expenseCategories;
@@ -70,7 +71,28 @@ export const load: PageServerLoad = async ({ parent }) => {
 		.where(sql`${exp.fxRateX10000} is not null`)
 		.orderBy(desc(exp.date))
 		.limit(1);
+	// Last month's entries, to copy the regular ones (rent, salaries…) into this month.
+	const prevMonth = shiftMonth(month, -1);
+	const previous = await db
+		.select()
+		.from(exp)
+		.where(inMonth(prevMonth))
+		.orderBy(asc(exp.date), asc(exp.createdAt));
+	const lastDay = Number(monthEnd(month).slice(8));
 	return {
+		prevMonth,
+		previous: previous.map((e) => {
+			const day = Math.min(Number(e.date.slice(8, 10)), lastDay);
+			return {
+				id: e.id,
+				categoryId: e.categoryId,
+				amount: e.amount,
+				note: e.note,
+				date: `${month}-${String(day).padStart(2, '0')}`,
+				// Already entered this month (same category + note, any amount) → don't copy twice.
+				done: rows.some((r) => r.categoryId === e.categoryId && (r.note ?? '') === (e.note ?? ''))
+			};
+		}),
 		categories: cats,
 		expenses: rows,
 		byCat,
@@ -134,6 +156,37 @@ export const actions: Actions = {
 		}
 		await db.insert(exp).values(p.values);
 		return { saved: 'Expense added.' };
+	},
+
+	/** Add several expenses at once (copied from last month). */
+	copy: async ({ request }) => {
+		const raw = String((await request.formData()).get('rows') ?? '[]');
+		let rows: { categoryId: string; amount: string; note: string | null; date: string }[];
+		try {
+			rows = JSON.parse(raw);
+		} catch {
+			return fail(400, { error: 'Nothing to add.' });
+		}
+		if (!Array.isArray(rows) || !rows.length) return fail(400, { error: 'Pick at least one.' });
+		const valid = new Set((await categories()).map((c) => c.id));
+		const values = [];
+		for (const r of rows) {
+			if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date) || !valid.has(r.categoryId))
+				return fail(400, { error: 'Something in the list is not valid.' });
+			let amount: number;
+			try {
+				amount = Math.abs(toPaisa(r.amount));
+			} catch {
+				return fail(400, { error: 'Amounts must be numbers.' });
+			}
+			if (!amount) continue;
+			values.push({ date: r.date, categoryId: r.categoryId, amount, note: r.note || null });
+		}
+		if (!values.length) return fail(400, { error: 'Enter at least one amount.' });
+		if (await isLocked(values[0].date))
+			return fail(400, { error: 'That month is locked. Unlock it in Reports first.' });
+		await db.insert(exp).values(values);
+		return { saved: `${values.length} expense${values.length === 1 ? '' : 's'} added.` };
 	},
 
 	delete: async ({ request }) => {

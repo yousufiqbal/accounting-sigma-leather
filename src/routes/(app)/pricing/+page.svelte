@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { productGroups } from '#lib/group-rows.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import { formAction } from '#lib/form-action.js';
@@ -18,6 +19,7 @@
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
+	const groups = $derived(productGroups(data.rows));
 	type Row = (typeof data.rows)[number];
 
 	/** Edits keep their row, so changes made on other pages/filters still get pushed. */
@@ -47,10 +49,12 @@
 	}
 	const useSuggested = (r: Row) => r.suggested && setEdit(r, String(r.suggested / 100));
 
-	const siblings = (r: Row) =>
-		data.rows.filter((x) => x.productId === r.productId && x.id !== r.id);
-	const firstOfProduct = (r: Row, i: number) =>
-		i === 0 || data.rows[i - 1].productId !== r.productId;
+	/** "Price for all" box on a product's header row: same new price on every variant on this page. */
+	let groupVal = $state<Record<string, string>>({});
+	function setGroup(r: Row, val: string) {
+		groupVal[r.productId] = val;
+		for (const x of data.rows) if (x.productId === r.productId) setEdit(x, val);
+	}
 	function suggestAllOnPage() {
 		for (const r of data.rows) if (r.suggested && r.suggested !== r.price) useSuggested(r);
 	}
@@ -322,23 +326,47 @@
 					{#each data.rows as r, i (r.id)}
 						{@const np = newPrice(r)}
 						{@const npProfit = np !== null && r.cost > 0 ? profitAt(np, r.cost) : null}
+						{#if groups[i].first && groups[i].grouped}
+							<Table.Row class="bg-muted/40 hover:bg-muted/40">
+								<Table.Cell colspan={7} class="py-2 pr-6 pl-6">
+									<div class="flex items-center gap-3">
+										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
+											>{r.productTitle}</span
+										>
+										<span class="text-xs text-muted-foreground">{groups[i].size} variants</span>
+										<div class="ml-auto flex items-center gap-2">
+											<span class="text-xs text-muted-foreground">Price for all</span>
+											<Input
+												value={groupVal[r.productId] ?? ''}
+												oninput={(ev) => setGroup(r, ev.currentTarget.value)}
+												placeholder="Rs"
+												inputmode="decimal"
+												class="h-8 w-24 text-right"
+												aria-label="New price for every variant of {r.productTitle}"
+											/>
+										</div>
+									</div>
+								</Table.Cell>
+							</Table.Row>
+						{/if}
 						<Table.Row class={np !== null ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-80 pl-6">
+							<Table.Cell class={['max-w-80 pl-6', groups[i].grouped && 'pl-12']}>
 								<div class="flex items-center gap-3">
 									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
 									<div class="min-w-0">
-										<div
-											class={[
-												'truncate',
-												firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground'
-											]}
-											title={r.productTitle}
-										>
-											{r.productTitle}
-										</div>
-										<div class="truncate text-xs text-muted-foreground">
-											{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
-										</div>
+										{#if groups[i].grouped}
+											<div class="truncate">{r.variantTitle ?? 'Default'}</div>
+											{#if r.sku}<div class="truncate text-xs text-muted-foreground">
+													{r.sku}
+												</div>{/if}
+										{:else}
+											<div class="truncate font-medium" title={r.productTitle}>
+												{r.productTitle}
+											</div>
+											<div class="truncate text-xs text-muted-foreground">
+												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+											</div>
+										{/if}
 									</div>
 								</div>
 							</Table.Cell>
@@ -394,15 +422,6 @@
 											>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
 										>
 									{/if}
-									{#if firstOfProduct(r, i) && np && siblings(r).length}
-										<Button
-											size="xs"
-											variant="ghost"
-											title="Same price for all variants"
-											onclick={() => siblings(r).forEach((s) => setEdit(s, edits[r.id].val))}
-											>all</Button
-										>
-									{/if}
 								</div>
 							</Table.Cell>
 						</Table.Row>
@@ -449,7 +468,7 @@
 			>
 			<span class="text-xs">if the same units sell</span>
 		</span>
-		<Button variant="ghost" onclick={() => (edits = {})}>Discard</Button>
+		<Button variant="ghost" onclick={() => ((edits = {}), (groupVal = {}))}>Discard</Button>
 		<Button onclick={() => (review = true)}>Review & update Shopify</Button>
 	</div>
 {/if}
@@ -491,6 +510,7 @@
 					busy = null;
 					if (result.type === 'success') {
 						edits = {};
+						groupVal = {};
 						review = false;
 					}
 				};

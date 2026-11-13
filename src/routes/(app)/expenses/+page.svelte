@@ -7,6 +7,7 @@
 	import Trash from '@lucide/svelte/icons/trash-2';
 	import Lock from '@lucide/svelte/icons/lock';
 	import X from '@lucide/svelte/icons/x';
+	import Copy from '@lucide/svelte/icons/copy';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -33,6 +34,32 @@
 	let amount = $state('');
 
 	const catById = $derived(new Map(data.categories.map((c) => [c.id, c])));
+
+	// ── Copy last month's regular expenses ──
+	let copyOpen = $state(false);
+	let copying = $state(false);
+	type CopyRow = {
+		id: string;
+		on: boolean;
+		categoryId: string;
+		amount: string;
+		note: string | null;
+		date: string;
+	};
+	let copyRows = $state<CopyRow[]>([]);
+	function openCopy() {
+		// Ads change every month and anything already entered isn't copied again — both start unticked.
+		copyRows = data.previous.map((e) => ({
+			id: e.id,
+			on: !e.done && catById.get(e.categoryId)?.group !== 'marketing',
+			categoryId: e.categoryId,
+			amount: String(e.amount / 100),
+			note: e.note,
+			date: e.date
+		}));
+		copyOpen = true;
+	}
+	const picked = $derived(copyRows.filter((r) => r.on));
 	const totals = $derived(new Map(data.byCat.map((c) => [c.categoryId, c.total])));
 	const total = $derived(data.byCat.reduce((s, c) => s + c.total, 0));
 	const marketing = $derived(
@@ -77,7 +104,14 @@
 				expenses.
 			</p>
 		</div>
-		<Button onclick={() => openForm(null)} disabled={data.locked}><Plus /> Add expense</Button>
+		<div class="flex flex-wrap gap-2">
+			{#if data.previous.length}
+				<Button variant="outline" onclick={openCopy} disabled={data.locked}>
+					<Copy /> Copy from {monthLabel(data.prevMonth)}
+				</Button>
+			{/if}
+			<Button onclick={() => openForm(null)} disabled={data.locked}><Plus /> Add expense</Button>
+		</div>
 	</div>
 
 	{#if data.locked}
@@ -324,6 +358,82 @@
 				/>
 			</div>
 			<Button type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save'}</Button>
+		</form>
+	</Sheet.Content>
+</Sheet.Root>
+
+<Sheet.Root bind:open={copyOpen}>
+	<Sheet.Content side="right" class="w-full sm:max-w-xl!">
+		<Sheet.Header>
+			<Sheet.Title>Copy from {monthLabel(data.prevMonth)}</Sheet.Title>
+			<Sheet.Description>
+				Tick the regular expenses to add to {monthLabel(data.month)} and adjust amounts. Ads and anything
+				already entered this month start unticked.
+			</Sheet.Description>
+		</Sheet.Header>
+		<form
+			method="POST"
+			action={formAction('copy')}
+			class="grid gap-3 overflow-auto px-4 pb-6"
+			use:enhance={() => {
+				copying = true;
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					copying = false;
+					if (result.type === 'success') copyOpen = false;
+				};
+			}}
+		>
+			<input
+				type="hidden"
+				name="rows"
+				value={JSON.stringify(
+					picked.map((r) => ({
+						categoryId: r.categoryId,
+						amount: r.amount,
+						note: r.note,
+						date: r.date
+					}))
+				)}
+			/>
+			{#each copyRows as r (r.id)}
+				<label
+					class={[
+						'flex items-center gap-3 rounded-md border px-3 py-2 text-sm',
+						r.on ? 'bg-card' : 'opacity-60'
+					]}
+				>
+					<input type="checkbox" bind:checked={r.on} class="size-4" />
+					<span class="min-w-0 flex-1">
+						<span class="font-medium">{catById.get(r.categoryId)?.name ?? '—'}</span>
+						{#if r.note}<span class="text-muted-foreground"> · {r.note}</span>{/if}
+						<span class="block text-xs text-muted-foreground"
+							>{new Date(`${r.date}T12:00:00+05:00`).toLocaleDateString('en-GB', {
+								day: 'numeric',
+								month: 'short'
+							})}</span
+						>
+					</span>
+					<Input
+						bind:value={r.amount}
+						inputmode="decimal"
+						class="h-8 w-28 text-right"
+						aria-label="Amount for {catById.get(r.categoryId)?.name}"
+					/>
+				</label>
+			{/each}
+			<Sheet.Footer class="px-0">
+				<Button type="submit" disabled={copying || !picked.length}>
+					{copying
+						? 'Adding…'
+						: `Add ${picked.length} expense${picked.length === 1 ? '' : 's'} · ${formatRs(
+								picked.reduce(
+									(n, r) => n + Math.round(Number(r.amount.replace(/,/g, '')) * 100 || 0),
+									0
+								)
+							)}`}
+				</Button>
+			</Sheet.Footer>
 		</form>
 	</Sheet.Content>
 </Sheet.Root>

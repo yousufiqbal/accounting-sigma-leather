@@ -22,11 +22,11 @@
 	const todo = $derived(
 		[
 			data.todo.customNoCost && {
-				text: `${data.todo.customNoCost} custom item${data.todo.customNoCost === 1 ? '' : 's'} on delivered orders have no cost`,
+				text: `${data.todo.customNoCost} custom item${data.todo.customNoCost === 1 ? ' on a delivered order has' : 's on delivered orders have'} no cost`,
 				href: '/orders/no-cost'
 			},
 			data.stock.missing && {
-				text: `${data.stock.missing} in-stock product${data.stock.missing === 1 ? '' : 's'} have no cost`,
+				text: `${data.stock.missing} in-stock product${data.stock.missing === 1 ? ' has' : 's have'} no cost`,
 				href: '/inventory/opening'
 			},
 			data.attention.inventory && {
@@ -34,7 +34,7 @@
 				href: '/inventory'
 			},
 			data.attention.couriers && {
-				text: `${data.attention.couriers} parcel${data.attention.couriers === 1 ? '' : 's'} need attention (not linked or conflicting)`,
+				text: `${data.attention.couriers} parcel${data.attention.couriers === 1 ? ' is' : 's are'} not linked to an order or conflicting`,
 				href: '/couriers?view=attention'
 			},
 			data.todo.noCourierData && {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { productGroups } from '#lib/group-rows.js';
 	import { formAction } from '#lib/form-action.js';
 	import { ask } from '#lib/confirm.svelte.js';
 	import { enhance } from '$app/forms';
@@ -18,6 +19,7 @@
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+	const groups = $derived(productGroups(data.rows));
 
 	type Row = (typeof data.rows)[number];
 	type Edit = { price: string; currency: 'RMB' | 'PKR'; ok: boolean; ddp: string; weight: string };
@@ -377,22 +379,36 @@
 						{#each data.rows as r, i (r.id)}
 							{@const e = cur(r)}
 							{@const used = costUsed(r)}
+							{#if groups[i].first && groups[i].grouped}
+								<Table.Row class="bg-muted/40 hover:bg-muted/40">
+									<Table.Cell colspan={7} class="py-2 pr-6 pl-6">
+										<div class="flex items-center gap-3">
+											<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
+												>{r.productTitle}</span
+											>
+											<span class="text-xs text-muted-foreground">{groups[i].size} variants</span>
+										</div>
+									</Table.Cell>
+								</Table.Row>
+							{/if}
 							<Table.Row class={edits[r.id] ? 'bg-warning-soft/40' : ''}>
-								<Table.Cell class="max-w-72 pl-6">
+								<Table.Cell class={['max-w-72 pl-6', groups[i].grouped && 'pl-12']}>
 									<div class="flex items-center gap-3">
 										<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
 										<div class="min-w-0">
-											<div
-												class={[
-													'truncate',
-													firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground'
-												]}
-											>
-												{r.productTitle}
-											</div>
-											<div class="truncate text-xs text-muted-foreground">
-												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
-											</div>
+											{#if groups[i].grouped}
+												<div class="truncate">{r.variantTitle ?? 'Default'}</div>
+												{#if r.sku}<div class="truncate text-xs text-muted-foreground">
+														{r.sku}
+													</div>{/if}
+											{:else}
+												<div class="truncate font-medium" title={r.productTitle}>
+													{r.productTitle}
+												</div>
+												<div class="truncate text-xs text-muted-foreground">
+													{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+												</div>
+											{/if}
 										</div>
 									</div>
 								</Table.Cell>
