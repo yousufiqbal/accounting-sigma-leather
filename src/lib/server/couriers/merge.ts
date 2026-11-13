@@ -136,11 +136,18 @@ export function mergeOne(
 		set(k, v as never);
 	}
 
-	if (!(inc.feesEstimated && !existing.feesEstimated)) {
+	// An estimate never replaces real figures. Existing values count as real only when they are
+	// on a statement or non-zero — a 0 saved while the parcel was in transit is just "not known yet".
+	const realFees =
+		!existing.feesEstimated &&
+		(!!existingStatementNumber || existing.fee + existing.feeTax + existing.returnFee > 0);
+	const realTaxes =
+		!existing.taxesEstimated && (!!existingStatementNumber || existing.itwh + existing.stwh > 0);
+	if (!(inc.feesEstimated && realFees)) {
 		for (const k of FEE_FIELDS) if (inc[k] !== undefined) set(k, inc[k]!);
 		if (inc.feesEstimated !== undefined) set('feesEstimated', inc.feesEstimated);
 	}
-	if (!(inc.taxesEstimated && !existing.taxesEstimated)) {
+	if (!(inc.taxesEstimated && realTaxes)) {
 		for (const k of TAX_FIELDS) if (inc[k] !== undefined) set(k, inc[k]!);
 		if (inc.taxesEstimated !== undefined) set('taxesEstimated', inc.taxesEstimated);
 	}
