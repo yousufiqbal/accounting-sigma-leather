@@ -10,7 +10,6 @@ import {
 	productPerUnit,
 	productUnitsPerOrder,
 	profitPerUnit,
-	pushPrices,
 	setPricingSettings,
 	suggestedPrice,
 	WINDOW_DAYS,
@@ -214,25 +213,6 @@ export const actions: Actions = {
 		} catch {
 			return fail(400, { error: 'Percentages must be 0–99 and amounts must be numbers.' });
 		}
-	},
-
-	push: async ({ request }) => {
-		const raw = String((await request.formData()).get('changes') ?? '[]');
-		let changes: { id: string; price: number }[];
-		try {
-			changes = (JSON.parse(raw) as { id: string; price: string }[]).map((c) => {
-				const price = toPaisa(c.price);
-				if (!(price > 0)) throw new Error();
-				return { id: String(c.id), price };
-			});
-		} catch {
-			return fail(400, { error: 'Prices must be numbers above 0.' });
-		}
-		if (!changes.length) return fail(400, { error: 'No price changes.' });
-		const r = await pushPrices(changes);
-		return r.failed
-			? fail(502, { error: `Updated ${r.done} prices in Shopify; ${r.failed} failed — try again.` })
-			: { saved: `Updated ${r.done} prices in Shopify.`, pushed: true };
 	}
 };
 

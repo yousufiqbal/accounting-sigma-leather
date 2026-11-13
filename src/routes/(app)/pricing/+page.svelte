@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { invalidateAll } from '$app/navigation';
+	import { toast } from 'svelte-sonner';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import Calculator from '@lucide/svelte/icons/calculator';
 	import { productGroups } from '#lib/group-rows.js';
@@ -6,7 +8,6 @@
 	import { page } from '$app/state';
 	import { formAction } from '#lib/form-action.js';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import Wand from '@lucide/svelte/icons/wand-sparkles';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
@@ -44,6 +45,95 @@
 	);
 
 	/** perUnit: the product's own share of the per-order cost (bulk items carry less). */
+	// ── Push to Shopify in batches, with progress ──
+	type PushState = {
+		running: boolean;
+		stop: boolean;
+		stopped: boolean;
+		total: number;
+		processed: number;
+		updated: number;
+		failed: string[];
+		elapsed: number;
+		error: string | null;
+	};
+	let push = $state<PushState | null>(null);
+	const BATCH = 20;
+	async function startPush() {
+		const list = changes.map((c) => ({ id: c.r.id, productId: c.r.productId, price: c.price }));
+		if (!list.length) return;
+		// Keep a product's variants in the same batch (Shopify updates them per product).
+		const batches: (typeof list)[] = [];
+		let cur: typeof list = [];
+		for (const c of [...list].sort((x, y) => x.productId.localeCompare(y.productId))) {
+			if (cur.length >= BATCH && cur[cur.length - 1].productId !== c.productId) {
+				batches.push(cur);
+				cur = [];
+			}
+			cur.push(c);
+		}
+		if (cur.length) batches.push(cur);
+
+		push = {
+			running: true,
+			stop: false,
+			stopped: false,
+			total: list.length,
+			processed: 0,
+			updated: 0,
+			failed: [],
+			elapsed: 0,
+			error: null
+		};
+		const t0 = Date.now();
+		const tick = setInterval(
+			() => push && (push.elapsed = Math.round((Date.now() - t0) / 1000)),
+			500
+		);
+		const doneIds: string[] = [];
+		try {
+			for (const b of batches) {
+				if (push.stop) {
+					push.stopped = true;
+					break;
+				}
+				const res = await fetch('/pricing/push', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(b.map((c) => ({ id: c.id, price: c.price })))
+				});
+				if (!res.ok) {
+					push.failed.push(...b.map((c) => c.id));
+					push.error = `Shopify update failed (HTTP ${res.status}) — you can retry.`;
+				} else {
+					const r = (await res.json()) as { doneIds: string[]; failedIds: string[] };
+					doneIds.push(...r.doneIds);
+					push.updated += r.doneIds.length;
+					push.failed.push(...r.failedIds);
+				}
+				push.processed += b.length;
+			}
+		} catch (e) {
+			push.error = `Connection lost: ${e instanceof Error ? e.message : e}. Updated ones are saved — retry the rest.`;
+		} finally {
+			clearInterval(tick);
+			push.elapsed = Math.round((Date.now() - t0) / 1000);
+			push.running = false;
+		}
+		// Clear the edits that went through; failed / not-yet-sent ones stay for a retry.
+		const failed = new Set(push.failed);
+		for (const id of doneIds) if (!failed.has(id)) delete edits[id];
+		if (!Object.keys(edits).length) groupVal = {};
+		await invalidateAll();
+		if (push.failed.length || push.stopped || push.error)
+			toast.error(`Updated ${push.updated} prices; ${list.length - push.updated} not updated.`);
+		else {
+			toast.success(`Updated ${push.updated} prices in Shopify (${push.elapsed}s).`);
+			review = false;
+			push = null;
+		}
+	}
+
 	const profitAt = (price: number, cost: number, perUnit = e.perUnit) =>
 		e.mode === 'fixed'
 			? Math.round(price * (1 - COD_TAX) - cost) // cost-plus: only the 4% COD tax
@@ -69,9 +159,6 @@
 	function setGroup(r: Row, val: string) {
 		groupVal[r.productId] = val;
 		for (const x of data.rows) if (x.productId === r.productId) setEdit(x, val);
-	}
-	function suggestAllOnPage() {
-		for (const r of data.rows) if (r.suggested && r.suggested !== r.price) useSuggested(r);
 	}
 
 	const tone = (margin: number | null) =>
@@ -184,20 +271,11 @@
 					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
 				</form>
 			</div>
-			<div class="flex flex-wrap items-center justify-between gap-2">
-				{#if data.view === 'nocost'}
-					<Card.Description>
-						Add costs on the <a href="/inventory" class="underline">Inventory</a> page first.
-					</Card.Description>
-				{:else}
-					<span></span>
-				{/if}
-				{#if data.rows.some((r) => r.suggested && r.suggested !== r.price)}
-					<Button size="sm" variant="outline" onclick={suggestAllOnPage}
-						><Wand /> Use suggested for this page</Button
-					>
-				{/if}
-			</div>
+			{#if data.view === 'nocost'}
+				<Card.Description>
+					Add costs on the <a href="/inventory" class="underline">Inventory</a> page first.
+				</Card.Description>
+			{/if}
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
 			<Table.Root sticky>
@@ -379,7 +457,9 @@
 <Sheet.Root bind:open={review}>
 	<Sheet.Content side="right" class="w-full sm:max-w-lg">
 		<Sheet.Header>
-			<Sheet.Title>Update {changes.length} prices in Shopify</Sheet.Title>
+			<Sheet.Title
+				>Update {changes.length} price{changes.length === 1 ? '' : 's'} in Shopify</Sheet.Title
+			>
 			<Sheet.Description>
 				Live store prices change immediately. Compare-at prices are not touched.
 			</Sheet.Description>
@@ -411,28 +491,7 @@
 				</div>
 			{/each}
 		</div>
-		<form
-			method="POST"
-			action={formAction('push')}
-			class="grid gap-2 p-4"
-			use:enhance={() => {
-				busy = 'push';
-				return async ({ update, result }) => {
-					await update({ reset: false });
-					busy = null;
-					if (result.type === 'success') {
-						edits = {};
-						groupVal = {};
-						review = false;
-					}
-				};
-			}}
-		>
-			<input
-				type="hidden"
-				name="changes"
-				value={JSON.stringify(changes.map((c) => ({ id: c.r.id, price: String(c.price / 100) })))}
-			/>
+		<div class="grid gap-2 p-4">
 			<p class="text-sm">
 				Estimated effect: <b class={impact >= 0 ? 'text-success' : 'text-danger'}
 					>{impact >= 0 ? '+' : ''}{formatRs(impact)}/month</b
@@ -441,10 +500,45 @@
 					>(same units as the last {data.windowDays} days — higher prices may sell fewer)</span
 				>
 			</p>
-			<Button type="submit" disabled={!!busy}
-				>{busy === 'push' ? 'Updating Shopify…' : `Update ${changes.length} prices`}</Button
-			>
-		</form>
+			{#if push}
+				{@const pctDone = push.total ? Math.round((push.processed / push.total) * 100) : 0}
+				<div class="grid gap-1.5 rounded-lg border p-3 text-sm">
+					<div class="flex items-center justify-between">
+						<span class="font-medium">
+							{push.running ? 'Updating Shopify…' : push.stopped ? 'Stopped' : 'Finished'}
+						</span>
+						<span class="num text-muted-foreground">{push.elapsed}s</span>
+					</div>
+					<div class="h-2 overflow-hidden rounded-full bg-muted">
+						<div class="h-full bg-primary transition-all" style:width="{pctDone}%"></div>
+					</div>
+					<div class="flex flex-wrap gap-x-4 text-xs text-muted-foreground">
+						<span><b class="text-foreground">{push.processed}</b> of {push.total} done</span>
+						<span class="text-success">{push.updated} updated</span>
+						{#if push.failed.length}<span class="text-danger">{push.failed.length} failed</span
+							>{/if}
+						{#if push.running && push.processed}<span
+								>~{Math.max(
+									1,
+									Math.round((push.elapsed / push.processed) * (push.total - push.processed))
+								)}s left</span
+							>{/if}
+					</div>
+					{#if push.error}<p class="text-xs text-danger">{push.error}</p>{/if}
+				</div>
+			{/if}
+			{#if push?.running}
+				<Button variant="outline" onclick={() => push && (push.stop = true)}
+					>Stop after this batch</Button
+				>
+			{:else}
+				<Button onclick={startPush} disabled={!changes.length}>
+					{push?.failed.length
+						? `Retry ${changes.length} price${changes.length === 1 ? '' : 's'}`
+						: `Update ${changes.length} price${changes.length === 1 ? '' : 's'}`}
+				</Button>
+			{/if}
+		</div>
 	</Sheet.Content>
 </Sheet.Root>
 

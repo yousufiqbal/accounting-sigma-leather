@@ -297,5 +297,5 @@ export async function pushPrices(changes: { id: string; price: number }[]) {
 		);
 		done.push(...list.map((c) => c.id));
 	}
-	return { done: done.length, failed: failed.length };
+	return { done: done.length, failed: failed.length, doneIds: done, failedIds: failed };
 }
