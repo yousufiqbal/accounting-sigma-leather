@@ -9,9 +9,9 @@
  *   returned  → all fees on it count as return cost.
  * Expenses: by expense date.
  */
-import { and, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
-import { monthBoundsUtc } from '../month.js';
+import { PKT_OFFSET_MS, monthEnd, monthsBetween } from '../month.js';
 
 const DELIVERED_ORDERS = (start: string, end: string) => sql`
 	with first_delivery as (
@@ -28,10 +28,17 @@ const DELIVERED_ORDERS = (start: string, end: string) => sql`
 	from first_delivery d join orders o on o.id = d.order_id
 	where d.at >= ${start} and d.at < ${end}`;
 
-export type Pnl = Awaited<ReturnType<typeof incomeStatement>>;
+export type Pnl = Awaited<ReturnType<typeof periodStatement>>;
 
+/** One Karachi month ("YYYY-MM"). */
 export async function incomeStatement(month: string) {
-	const { start, end } = monthBoundsUtc(month);
+	return { ...(await periodStatement(`${month}-01`, monthEnd(month), month)), month };
+}
+
+/** Any period: `from`..`to` are inclusive Karachi dates ("YYYY-MM-DD"). */
+export async function periodStatement(from: string, to: string, month: string | null = null) {
+	const start = new Date(Date.parse(`${from}T00:00:00Z`) - PKT_OFFSET_MS).toISOString();
+	const end = new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000 - PKT_OFFSET_MS).toISOString();
 
 	// ── Sales ──
 	const orders = (await db.all(DELIVERED_ORDERS(start, end))) as {
@@ -77,8 +84,9 @@ export async function incomeStatement(month: string) {
 	const netSales = gross - prepaidDisc - otherDisc + shipping + adjust;
 
 	// ── COGS + per product ──
-	const lines = normalIds.length + courierOnlyIds.length
-		? ((await db.all(sql`
+	const lines =
+		normalIds.length + courierOnlyIds.length
+			? ((await db.all(sql`
 			with ln as (
 				select l.*, case when l.order_id in (select value from json_each(${JSON.stringify(courierOnlyIds)}))
 					then coalesce(nullif(l.qty, 0), l.ordered_qty, 0) else l.qty end as q
@@ -97,15 +105,15 @@ export async function incomeStatement(month: string) {
 			where l.q > 0
 			group by productKey
 			order by sales desc`)) as {
-				productKey: string;
-				product: string;
-				units: number;
-				sales: number;
-				cogs: number;
-				unitsNoCost: number;
-				cogsEstimated: number;
-			}[])
-		: [];
+					productKey: string;
+					product: string;
+					units: number;
+					sales: number;
+					cogs: number;
+					unitsNoCost: number;
+					cogsEstimated: number;
+				}[])
+			: [];
 	const cogs = lines.reduce((s, l) => s + l.cogs, 0);
 	const cogsEstimated = lines.reduce((s, l) => s + l.cogsEstimated, 0);
 	const unitsNoCost = lines.reduce((s, l) => s + l.unitsNoCost, 0);
@@ -146,8 +154,11 @@ export async function incomeStatement(month: string) {
 			amount: sql<number>`sum(${schema.expenses.amount})`
 		})
 		.from(schema.expenses)
-		.innerJoin(schema.expenseCategories, eq(schema.expenseCategories.id, schema.expenses.categoryId))
-		.where(and(gte(schema.expenses.date, `${month}-01`), lt(schema.expenses.date, `${month}-32`)))
+		.innerJoin(
+			schema.expenseCategories,
+			eq(schema.expenseCategories.id, schema.expenses.categoryId)
+		)
+		.where(and(gte(schema.expenses.date, from), lte(schema.expenses.date, to)))
 		.groupBy(schema.expenseCategories.id)
 		.orderBy(sql`sum(${schema.expenses.amount}) desc`);
 	const marketing = exp.filter((e) => e.group === 'marketing');
@@ -162,17 +173,31 @@ export async function incomeStatement(month: string) {
 				then -m.qty_delta * coalesce(nullif(m.unit_cost_paisa, 0), v.avg_cost_paisa, 0) else 0 end), 0) as amount,
 			coalesce(sum(case when m.reason is null then 1 else 0 end), 0) as pending
 		from stock_movements m left join variants v on v.id = m.variant_id
-		where m.type = 'variance' and m.at >= ${start} and m.at < ${end}`)) as { amount: number; pending: number }[];
+		where m.type = 'variance' and m.at >= ${start} and m.at < ${end}`)) as {
+		amount: number;
+		pending: number;
+	}[];
 
 	const netProfit = grossProfit - courierTotal - marketingTotal - operatingTotal - wo.amount;
 
-	const lock = await db.query.monthLocks.findFirst({ where: eq(schema.monthLocks.month, month) });
+	const months = monthsBetween(from.slice(0, 7), to.slice(0, 7));
+	const locks = await db
+		.select({ month: schema.monthLocks.month, at: schema.monthLocks.lockedAt })
+		.from(schema.monthLocks)
+		.where(inArray(schema.monthLocks.month, months));
+	const lock = locks.length === months.length ? locks[0] : null;
 	const provisional = c.estimated > 0 || cogsEstimated > 0 || unitsNoCost > 0;
 
 	return {
 		month,
-		status: lock ? ('locked' as const) : provisional ? ('provisional' as const) : ('final' as const),
-		lockedAt: lock?.lockedAt ?? null,
+		from,
+		to,
+		status: lock
+			? ('locked' as const)
+			: provisional
+				? ('provisional' as const)
+				: ('final' as const),
+		lockedAt: lock?.at ?? null,
 		sales: { gross, prepaidDisc, otherDisc, shipping, adjust, net: netSales, courierOnly },
 		cogs: { total: cogs, estimated: cogsEstimated, unitsNoCost },
 		grossProfit,
