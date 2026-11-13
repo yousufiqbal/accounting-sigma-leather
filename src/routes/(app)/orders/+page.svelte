@@ -51,7 +51,13 @@
 		not_shipped: { tone: 'muted', label: 'not shipped' },
 		cancelled: { tone: 'muted', label: 'cancelled' }
 	} as const;
-	const SORT_LABEL = { recent: 'Recent', low: 'Lowest profit', high: 'Highest profit' } as const;
+	const SORT_LABEL = {
+		recent: 'Delivery date',
+		order: 'Order # ↓',
+		order_asc: 'Order # ↑',
+		low: 'Lowest profit',
+		high: 'Highest profit'
+	} as const;
 </script>
 
 <div class="grid gap-6">

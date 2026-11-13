@@ -6,7 +6,7 @@ import { orderProfits } from '#lib/server/order-profit.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 50;
-const SORTS = ['recent', 'low', 'high'] as const;
+const SORTS = ['recent', 'order', 'order_asc', 'low', 'high'] as const;
 const o = schema.orders;
 
 /** Has at least one non-cancelled parcel. */
@@ -111,12 +111,18 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		profit: sum('profit'),
 		estimated: all.some((r) => r.cogsEstimated || r.courierEstimated || r.unitsNoCost > 0)
 	};
+	const byName = (a: { name: string }, b: { name: string }) =>
+		Number(a.name) - Number(b.name) || a.name.localeCompare(b.name);
 	const list = all.sort((a, b) =>
 		sort === 'low'
 			? a.profit - b.profit
 			: sort === 'high'
 				? b.profit - a.profit
-				: b.at.localeCompare(a.at)
+				: sort === 'order'
+					? byName(b, a)
+					: sort === 'order_asc'
+						? byName(a, b)
+						: b.at.localeCompare(a.at)
 	);
 	return {
 		...base,
