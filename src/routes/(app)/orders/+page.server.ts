@@ -99,7 +99,14 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 				and s.status in ('delivered', 'returned') and s.match_status != 'excluded')`)) as {
 		n: number;
 	}[];
-	const base = { mode, q, sort, page, noCourierCount, openCount };
+	// Delivered custom items (no Shopify product) still without a cost.
+	const [{ n: noCostCount }] = (await db.all(sql`
+		select count(*) as n from order_lines l join orders o on o.id = l.order_id
+		where l.variant_id is null and l.qty > 0 and coalesce(l.cost_snapshot_paisa, 0) = 0 and o.test = 0
+			and exists (select 1 from shipments s where s.order_id = o.id and s.status = 'delivered')`)) as {
+		n: number;
+	}[];
+	const base = { mode, q, sort, page, noCourierCount, openCount, noCostCount };
 
 	if (mode !== 'profit') {
 		const orders = await orderRows(mode === 'search' ? like(o.name, `%${q}%`) : noCourierData);

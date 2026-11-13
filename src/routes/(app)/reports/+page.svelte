@@ -267,9 +267,9 @@
 				{#if p.courier.estimated}{p.courier.estimated} parcels with estimated courier fees/tax (statement
 					not in yet).{/if}
 				{#if p.cogs.estimated}Product costs partly estimated ({formatRs(p.cogs.estimated)}).{/if}
-				{#if p.cogs.unitsNoCost}<a href="/inventory" class="underline"
-						>{p.cogs.unitsNoCost} units sold have no cost</a
-					> — profit is overstated.{/if}
+				{#if p.cogs.unitsNoCost}{p.cogs.unitsNoCost} units sold have no cost, so profit is overstated.
+					Set costs for <a href="/inventory" class="underline">products</a> or
+					<a href="/orders/no-cost" class="underline">custom items</a>.{/if}
 			</span>
 		</div>
 	{/if}

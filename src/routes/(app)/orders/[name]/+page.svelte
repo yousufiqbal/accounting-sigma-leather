@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
+	import { Input } from '#lib/components/ui/input/index.js';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -21,6 +23,7 @@
 
 	let costSheet = $state<CostSheet>();
 	let recorder = $state<RecordDelivery>();
+	let savingLine = $state<string | null>(null);
 
 	const COURIER: Record<string, string> = { postex: 'PostEx', dex: 'DEX', manual: 'Manual' };
 	const pct = (r: number) => (Number.isFinite(r) ? `${Math.round(r * 100)}%` : '—');
@@ -166,19 +169,53 @@
 									>
 										<Money paisa={l.unitCost} />
 									</button>
-								{:else}<Money paisa={l.unitCost} />{/if}
-								<div class="mt-0.5">
-									{#if !l.unitCost}
-										<StatusBadge tone="danger" label="no cost" />
-									{:else if l.frozen && !l.estimated}
-										<StatusBadge tone="success" label="at shipping" />
-									{:else}
-										<StatusBadge
-											tone={COST_SOURCE[l.costSource]?.tone ?? 'warning'}
-											label={l.estimated ? 'estimated' : COST_SOURCE[l.costSource]?.label}
+								{:else}
+									<!-- Custom item (no Shopify product): cost is entered here. -->
+									<form
+										method="POST"
+										action="/orders/no-cost?/setCost"
+										class="flex items-center justify-end gap-1"
+										use:enhance={() => {
+											savingLine = l.id;
+											return async ({ update }) => {
+												await update({ reset: false });
+												savingLine = null;
+											};
+										}}
+									>
+										<input type="hidden" name="lineIds" value={l.id} />
+										<Input
+											name="cost"
+											inputmode="decimal"
+											value={l.unitCost ? String(l.unitCost / 100) : ''}
+											placeholder="Cost / unit"
+											class="h-7 w-24 text-right"
 										/>
-									{/if}
-								</div>
+										<Button type="submit" size="xs" variant="outline" disabled={savingLine === l.id}
+											>{savingLine === l.id ? '…' : 'Save'}</Button
+										>
+									</form>
+									<div class="mt-0.5">
+										{#if !l.unitCost}<StatusBadge
+												tone="danger"
+												label="custom item · no cost"
+											/>{:else}<StatusBadge tone="info" label="custom item" />{/if}
+									</div>
+								{/if}
+								{#if l.variantId}
+									<div class="mt-0.5">
+										{#if !l.unitCost}
+											<StatusBadge tone="danger" label="no cost" />
+										{:else if l.frozen && !l.estimated}
+											<StatusBadge tone="success" label="at shipping" />
+										{:else}
+											<StatusBadge
+												tone={COST_SOURCE[l.costSource]?.tone ?? 'warning'}
+												label={l.estimated ? 'estimated' : COST_SOURCE[l.costSource]?.label}
+											/>
+										{/if}
+									</div>
+								{/if}
 							</Table.Cell>
 							<Table.Cell class={['pr-6 text-right font-medium', l.profit < 0 && 'text-danger']}>
 								{formatRs(l.profit)}

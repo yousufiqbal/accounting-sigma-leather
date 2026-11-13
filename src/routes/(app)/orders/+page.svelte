@@ -88,6 +88,16 @@
 		</div>
 	</div>
 
+	{#if data.mode === 'profit' && data.noCostCount}
+		<a
+			href="/orders/no-cost"
+			class="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning-soft p-3 text-sm text-warning hover:underline"
+		>
+			<TriangleAlert class="mt-0.5 size-4 shrink-0" />
+			{data.noCostCount} custom item{data.noCostCount === 1 ? '' : 's'} on delivered orders
+			{data.noCostCount === 1 ? 'has' : 'have'} no cost — profit is overstated. Set costs
+		</a>
+	{/if}
 	{#if data.mode === 'profit' && data.noCourierCount}
 		<a
 			href={href({ view: 'nocourier', sort: null })}
