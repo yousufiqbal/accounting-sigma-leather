@@ -2,7 +2,8 @@ import { redirect } from '@sveltejs/kit';
 import type { Handle } from '@sveltejs/kit/hooks';
 import { SESSION_COOKIE, isValidSession } from '#lib/server/auth.js';
 
-const PUBLIC_PATHS = ['/login'];
+/** Browsers ask for /favicon.ico on their own — answer it (404) instead of redirecting to login. */
+const PUBLIC_PATHS = ['/login', '/favicon.ico'];
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const path = event.url.pathname;
