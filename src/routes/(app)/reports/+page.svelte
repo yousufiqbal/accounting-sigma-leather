@@ -116,6 +116,13 @@
 				value: -p.expenses.operatingTotal,
 				kind: 'sub'
 			},
+			{
+				key: 'expenses',
+				label: 'Total expenses',
+				value: -(p.expenses.marketingTotal + p.expenses.operatingTotal),
+				kind: 'total',
+				hint: 'marketing + operating'
+			},
 			...(p.writeOffs.amount
 				? [
 						{
