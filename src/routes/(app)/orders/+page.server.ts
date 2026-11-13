@@ -91,7 +91,15 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		.select({ n: sql<number>`count(*)` })
 		.from(o)
 		.where(noCourierData);
-	const base = { mode, q, sort, page, noCourierCount };
+	// Not delivered or returned yet (same rule as the In progress page).
+	const [{ n: openCount }] = (await db.all(sql`
+		select count(*) as n from orders o
+		where o.cancelled_at is null and o.test = 0 and o.total_paisa > 0
+			and not exists (select 1 from shipments s where s.order_id = o.id
+				and s.status in ('delivered', 'returned') and s.match_status != 'excluded')`)) as {
+		n: number;
+	}[];
+	const base = { mode, q, sort, page, noCourierCount, openCount };
 
 	if (mode !== 'profit') {
 		const orders = await orderRows(mode === 'search' ? like(o.name, `%${q}%`) : noCourierData);

@@ -49,7 +49,7 @@ function classify(r: {
 }
 
 /** Usual delivery cost per parcel (fee + tax), from real PostEx data. */
-async function estimatedFee() {
+export async function estimatedFee() {
 	const fees = await db
 		.select({ v: sql<number>`${s.fee} + ${s.feeTax}` })
 		.from(s)

@@ -3,6 +3,7 @@
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import Truck from '@lucide/svelte/icons/truck';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
@@ -68,18 +69,23 @@
 				Profit per order, by the month it was delivered or returned.
 			</p>
 		</div>
-		<form method="GET" data-sveltekit-keepfocus>
-			{#each [...page.url.searchParams].filter(([k]) => k === 'm') as [k, v] (k)}
-				<input type="hidden" name={k} value={v} />
-			{/each}
-			<Input
-				name="q"
-				value={data.q}
-				placeholder="Find order # (any month)"
-				class="h-9 w-56"
-				type="search"
-			/>
-		</form>
+		<div class="flex flex-wrap items-center gap-2">
+			<Button href="/orders/in-progress" variant="outline">
+				<Truck /> In progress ({data.openCount})
+			</Button>
+			<form method="GET" data-sveltekit-keepfocus>
+				{#each [...page.url.searchParams].filter(([k]) => k === 'm') as [k, v] (k)}
+					<input type="hidden" name={k} value={v} />
+				{/each}
+				<Input
+					name="q"
+					value={data.q}
+					placeholder="Find order # (any month)"
+					class="h-9 w-56"
+					type="search"
+				/>
+			</form>
+		</div>
 	</div>
 
 	{#if data.mode === 'profit' && data.noCourierCount}
