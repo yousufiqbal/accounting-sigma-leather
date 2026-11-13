@@ -78,9 +78,11 @@ export function syncVariants(stockAnchor?: string) {
 		let count = 0;
 		const now = new Date().toISOString();
 		const before = new Map(
-			(await db.select({ id: schema.variants.id, onHand: schema.variants.shopifyOnHand }).from(schema.variants)).map(
-				(r) => [r.id, r.onHand]
-			)
+			(
+				await db
+					.select({ id: schema.variants.id, onHand: schema.variants.shopifyOnHand })
+					.from(schema.variants)
+			).map((r) => [r.id, r.onHand])
 		);
 		const afterOnHand = new Map<string, number>();
 		do {
@@ -125,7 +127,9 @@ export function syncVariants(stockAnchor?: string) {
 					weightG: toGrams(v.inventoryItem.measurement?.weight),
 					isBundle: v.requiresComponents,
 					imageUrl:
-						v.media.nodes[0]?.preview?.image?.url ?? v.product.featuredMedia?.preview?.image?.url ?? null,
+						v.media.nodes[0]?.preview?.image?.url ??
+						v.product.featuredMedia?.preview?.image?.url ??
+						null,
 					price: toPaisa(v.price),
 					shopifyCost: v.inventoryItem.unitCost ? toPaisa(v.inventoryItem.unitCost.amount) : null,
 					shopifyOnHand: onHand,
@@ -184,6 +188,12 @@ type OrderNode = {
 	shippingLines: { nodes: { discountedPriceSet: Money }[] };
 	discountApplications: { nodes: DiscountApp[] };
 	fulfillments: { createdAt: string; trackingInfo: { number: string | null }[] }[];
+	customer: {
+		id: string;
+		displayName: string | null;
+		defaultPhoneNumber: { phoneNumber: string } | null;
+	} | null;
+	shippingAddress: { city: string | null; phone: string | null } | null;
 	lineItems: {
 		nodes: {
 			id: string;
@@ -214,6 +224,8 @@ const ORDER_FIELDS = `
 		... on AutomaticDiscountApplication { title }
 	} }
 	fulfillments(first: 5) { createdAt trackingInfo(first: 3) { number } }
+	customer { id displayName defaultPhoneNumber { phoneNumber } }
+	shippingAddress { city phone }
 	lineItems(first: 60) { nodes {
 		id title sku quantity currentQuantity
 		variant { id }
@@ -271,7 +283,8 @@ function toRows(o: OrderNode) {
 		prepaidDiscount > 0;
 	const fulfilledAt = o.fulfillments.map((f) => f.createdAt).sort()[0] ?? null;
 	const fulfillmentTracking =
-		o.fulfillments.flatMap((f) => f.trackingInfo.map((t) => t.number?.trim())).find(Boolean) ?? null;
+		o.fulfillments.flatMap((f) => f.trackingInfo.map((t) => t.number?.trim())).find(Boolean) ??
+		null;
 	const order = {
 		id: orderId,
 		name: o.name.replace(/^#/, ''),
@@ -300,11 +313,21 @@ function toRows(o: OrderNode) {
 		tags: JSON.stringify(o.tags),
 		fulfilledAt,
 		fulfillmentTracking,
+		customerId: o.customer ? gidId(o.customer.id) : null,
 		test: o.test,
 		shopifyUpdatedAt: o.updatedAt,
 		updatedAt: new Date().toISOString()
 	};
-	return { order, lines };
+	const customer = o.customer
+		? {
+				id: gidId(o.customer.id),
+				name: o.customer.displayName,
+				phone: o.customer.defaultPhoneNumber?.phoneNumber ?? o.shippingAddress?.phone ?? null,
+				city: o.shippingAddress?.city ?? null,
+				updatedAt: o.updatedAt
+			}
+		: null;
+	return { order, lines, customer };
 }
 
 /** `recent` = orders updated since the last sync (minus a safety day); `full` = everything. */
@@ -331,8 +354,22 @@ export function syncOrders(mode: 'recent' | 'full' = 'recent') {
 			);
 			const stmts = [];
 			for (const node of d.orders.nodes) {
-				const { order, lines } = toRows(node);
+				const { order, lines, customer } = toRows(node);
 				const { id: _id, ...orderUpdate } = order;
+				if (customer) {
+					const { id: _cid, ...customerUpdate } = customer;
+					// Keep the details from the customer's most recent order.
+					stmts.push(
+						db
+							.insert(schema.customers)
+							.values(customer)
+							.onConflictDoUpdate({
+								target: schema.customers.id,
+								set: customerUpdate,
+								where: sql`coalesce(${schema.customers.updatedAt}, '') <= ${customer.updatedAt}`
+							})
+					);
+				}
 				stmts.push(
 					db
 						.insert(schema.orders)

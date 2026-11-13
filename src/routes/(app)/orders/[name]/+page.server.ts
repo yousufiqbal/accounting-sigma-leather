@@ -13,6 +13,14 @@ export const load: PageServerLoad = async ({ params }) => {
 	if (!order) error(404, `Order #${name} not found`);
 
 	const [profit] = await orderProfits({ ids: [order.id] });
+	const customer = order.customerId
+		? ((
+				await db.all(
+					sql`select id, name, (select count(*) from orders where customer_id = ${order.customerId}) as orders
+						from customers where id = ${order.customerId}`
+				)
+			)[0] as { id: string; name: string | null; orders: number } | undefined)
+		: undefined;
 	const courierOnly = !!order.cancelledAt || order.total <= 0;
 
 	// Items actually sent (cancelled-but-delivered orders: the ordered quantity).
@@ -98,6 +106,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			}[]
 		},
 		courierOnly,
+		customer: customer ?? null,
 		lines: lines.filter((l) => l.qty > 0),
 		parcels,
 		profit: profit ?? null,

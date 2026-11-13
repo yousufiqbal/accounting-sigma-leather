@@ -183,12 +183,27 @@ export const orders = sqliteTable(
 		fulfilledAt: text('fulfilled_at'),
 		/** First tracking number on any fulfilment; null = shipped without tracking (pickup, TCS…). */
 		fulfillmentTracking: text('fulfillment_tracking'),
+		/** Shopify customer (numeric id); null = no customer on the order. */
+		customerId: text('customer_id'),
 		test: integer('test', { mode: 'boolean' }).notNull().default(false),
 		shopifyUpdatedAt: text('shopify_updated_at'),
 		updatedAt: text('updated_at')
 	},
-	(t) => [uniqueIndex('orders_name_idx').on(t.name), index('orders_created_idx').on(t.createdAt)]
+	(t) => [
+		uniqueIndex('orders_name_idx').on(t.name),
+		index('orders_created_idx').on(t.createdAt),
+		index('orders_customer_idx').on(t.customerId)
+	]
 );
+
+/** Shopify customers (only what's needed: name, phone, city). */
+export const customers = sqliteTable('customers', {
+	id: text('id').primaryKey(), // shopify customer id
+	name: text('name'),
+	phone: text('phone'),
+	city: text('city'),
+	updatedAt: text('updated_at')
+});
 
 export const orderLines = sqliteTable(
 	'order_lines',

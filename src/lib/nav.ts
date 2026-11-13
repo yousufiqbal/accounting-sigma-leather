@@ -2,6 +2,7 @@ import LayoutDashboard from '@lucide/svelte/icons/layout-dashboard';
 import ChartColumn from '@lucide/svelte/icons/chart-column';
 import ShoppingCart from '@lucide/svelte/icons/shopping-cart';
 import Truck from '@lucide/svelte/icons/truck';
+import Users from '@lucide/svelte/icons/users';
 import Boxes from '@lucide/svelte/icons/boxes';
 import PackagePlus from '@lucide/svelte/icons/package-plus';
 import Receipt from '@lucide/svelte/icons/receipt';
@@ -13,6 +14,7 @@ export const nav = [
 	{ href: '/', label: 'Dashboard', icon: LayoutDashboard },
 	{ href: '/reports', label: 'Reports', icon: ChartColumn },
 	{ href: '/orders', label: 'Orders', icon: ShoppingCart },
+	{ href: '/customers', label: 'Customers', icon: Users },
 	{ href: '/couriers', label: 'Couriers', icon: Truck, badge: 'couriers' },
 	{ href: '/inventory', label: 'Inventory', icon: Boxes, badge: 'inventory' },
 	{ href: '/pricing', label: 'Pricing', icon: Tag },

@@ -77,7 +77,12 @@
 						/>{/if}
 				</h1>
 				<p class="text-sm text-muted-foreground">
-					Placed {fmtDate(o.createdAt)} · {payment}
+					{#if data.customer}<a
+							href="/customers/{data.customer.id}"
+							class="font-medium text-foreground hover:underline"
+							>{data.customer.name || 'Customer'}</a
+						>{data.customer.orders > 1 ? ` (${data.customer.orders} orders)` : ''} ·
+					{/if}Placed {fmtDate(o.createdAt)} · {payment}
 					{#if o.financialStatus}· Shopify: {o.financialStatus
 							.toLowerCase()
 							.replace(/_/g, ' ')}{/if}
