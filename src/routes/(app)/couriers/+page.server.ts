@@ -17,7 +17,6 @@ import {
 import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { postexConfigured } from '#lib/server/postex.js';
-import { syncPostex } from '#lib/server/couriers/sync-postex.js';
 import { ImportError, stageUpload } from '#lib/server/couriers/import-file.js';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -191,21 +190,6 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 };
 
 export const actions: Actions = {
-	sync: async ({ request }) => {
-		const mode = (await request.formData()).get('mode') === 'full' ? 'full' : 'recent';
-		try {
-			const r = await syncPostex(mode);
-			return {
-				saved:
-					`PostEx synced: ${r.fetched} parcels checked · ${r.new} new · ${r.updated} updated` +
-					(r.conflict ? ` · ${r.conflict} conflicts` : '') +
-					` · ${r.cprLinked} linked to payments` +
-					(r.cprPending ? ` (${r.cprPending} still waiting — sync again)` : '')
-			};
-		} catch (e) {
-			return fail(502, { error: `PostEx sync failed: ${e instanceof Error ? e.message : e}` });
-		}
-	},
 	upload: async ({ request, url }) => {
 		const file = (await request.formData()).get('file');
 		if (!(file instanceof File) || !file.size) return fail(400, { error: 'Choose a file first.' });

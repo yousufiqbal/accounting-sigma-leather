@@ -3,7 +3,6 @@ import { and, desc, eq, gte, isNull, like, lt, or, sql, type SQL } from 'drizzle
 import { db, schema } from '#lib/server/db/index.js';
 import { monthBoundsUtc } from '#lib/month.js';
 import { toPaisa } from '#lib/money.js';
-import { syncOrders, syncStock } from '#lib/server/shopify-sync.js';
 import { orderProfits } from '#lib/server/order-profit.js';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -163,24 +162,6 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 };
 
 export const actions: Actions = {
-	sync: async ({ request }) => {
-		const mode = (await request.formData()).get('mode') === 'full' ? 'full' : 'recent';
-		try {
-			if (mode === 'full') {
-				const r = await syncStock('full');
-				return {
-					saved: `Shopify synced: ${r.orders} orders · ${r.variants} products · ${r.parcelsLinked} parcels linked${r.assumedDelivered ? ` · ${r.assumedDelivered} untracked orders counted as delivered` : ''}${r.stockChanges ? ` · ${r.stockChanges} stock changes to review` : ''}`
-				};
-			}
-			const orders = await syncOrders(mode);
-			return {
-				saved: `Shopify synced: ${orders.orders} orders · ${orders.parcelsLinked} parcels linked${orders.assumedDelivered ? ` · ${orders.assumedDelivered} untracked orders counted as delivered` : ''}`
-			};
-		} catch (e) {
-			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
-		}
-	},
-
 	/** Record a delivery that has no PostEx/DEX data (Leopards, pickup, own rider…). */
 	manualDelivery: async ({ request }) => {
 		const f = await request.formData();
@@ -220,6 +201,3 @@ export const actions: Actions = {
 		return { saved: `#${order.name} marked ${status} (${how}).` };
 	}
 };
-
-/** Vercel: syncs can take minutes. */
-export const config = { maxDuration: 300 };

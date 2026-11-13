@@ -13,6 +13,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import ConfirmDialog from '#lib/components/app/confirm-dialog.svelte';
 	import Lightbox from '#lib/components/app/lightbox.svelte';
+	import SyncButton from '#lib/components/app/sync-button.svelte';
 	import { toast } from 'svelte-sonner';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -73,7 +74,8 @@
 
 	/** What each sidebar bubble counts (shown on hover). */
 	const BADGE_HINT: Record<string, string> = {
-		couriers: 'parcel(s) need a decision (conflicting data or not linked to an order) — see Needs attention',
+		couriers:
+			'parcel(s) need a decision (conflicting data or not linked to an order) — see Needs attention',
 		inventory: 'stock change(s) made in Shopify need a reason'
 	};
 	const hint = (key: string, n: number) => `${n} ${BADGE_HINT[key] ?? 'to check'}`;
@@ -92,7 +94,7 @@
 		<Sidebar.Header class="h-14 justify-center border-b border-sidebar-border px-2">
 			<a
 				href={navHref('/')}
-				class="flex items-center gap-2.5 rounded-md px-1.5 py-1 outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:px-0"
+				class="flex items-center gap-2.5 rounded-md px-1.5 py-1 outline-hidden group-data-[collapsible=icon]:px-0 focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 			>
 				<span
 					class="grid size-7 shrink-0 place-items-center rounded-md bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground"
@@ -113,11 +115,17 @@
 					<Sidebar.MenuItem>
 						<Sidebar.MenuButton
 							isActive={isActive(n.href)}
-							tooltipContent={count ? `${n.label} · ${hint('badge' in n ? n.badge : '', count)}` : n.label}
+							tooltipContent={count
+								? `${n.label} · ${hint('badge' in n ? n.badge : '', count)}`
+								: n.label}
 							class={item}
 						>
 							{#snippet child({ props })}
-								<a href={navHref(n.href)} {...props} title={count ? hint('badge' in n ? n.badge : '', count) : undefined}>
+								<a
+									href={navHref(n.href)}
+									{...props}
+									title={count ? hint('badge' in n ? n.badge : '', count) : undefined}
+								>
 									<n.icon />
 									<span>{n.label}</span>
 								</a>
@@ -167,7 +175,8 @@
 									</span>
 									<span class="grid min-w-0 flex-1 leading-none">
 										<span class="truncate text-[13px] font-medium">Admin</span>
-										<span class="mt-1 truncate text-[11px] text-muted-foreground">{data.email}</span>
+										<span class="mt-1 truncate text-[11px] text-muted-foreground">{data.email}</span
+										>
 									</span>
 									<ChevronsUpDown class="ml-auto size-3.5! text-muted-foreground" />
 								</Sidebar.MenuButton>
@@ -195,7 +204,11 @@
 	<Sidebar.Inset>
 		{#if navigating.to}
 			<!-- Page / month loading: indeterminate bar along the top. -->
-			<div class="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/15" role="progressbar" aria-label="Loading">
+			<div
+				class="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden bg-primary/15"
+				role="progressbar"
+				aria-label="Loading"
+			>
 				<div class="nav-progress h-full w-1/3 bg-primary"></div>
 			</div>
 		{/if}
@@ -203,7 +216,10 @@
 			class="sticky top-0 z-10 flex h-14 items-center gap-2 border-b bg-background/90 px-4 backdrop-blur"
 		>
 			<Sidebar.Trigger class="-ml-1 text-muted-foreground" />
-			<div class="ml-auto flex items-center rounded-lg border bg-card p-0.5 shadow-xs">
+			<div class="ml-auto">
+				<SyncButton last={data.sync.last} lastDex={data.sync.lastDex} />
+			</div>
+			<div class="flex items-center rounded-lg border bg-card p-0.5 shadow-xs">
 				<Button variant="ghost" size="icon-sm" href={monthHref(-1)} aria-label="Previous month">
 					<ChevronLeft />
 				</Button>

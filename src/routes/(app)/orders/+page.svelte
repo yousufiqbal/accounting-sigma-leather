@@ -2,7 +2,6 @@
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
@@ -18,7 +17,6 @@
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
-	let syncing = $state<string | null>(null);
 	let saving = $state(false);
 	let target = $state<(typeof data.orders)[number] | null>(null);
 	let open = $state(false);
@@ -74,29 +72,9 @@
 						timeZone: 'Asia/Karachi'
 					})}
 					{#if data.lastSync.ok === false}<span class="text-danger"> · failed</span>{/if}
-				{:else}Shopify never synced — run Full sync once.{/if}
+				{:else}Shopify never synced.{/if}
 			</p>
 		</div>
-		<form
-			method="POST"
-			action={formAction('sync')}
-			class="flex gap-2"
-			use:enhance={({ formData }) => {
-				syncing = String(formData.get('mode'));
-				return async ({ update }) => {
-					await update({ reset: false });
-					syncing = null;
-				};
-			}}
-		>
-			<Button type="submit" name="mode" value="recent" disabled={!!syncing}>
-				<RefreshCw class={syncing === 'recent' ? 'animate-spin' : ''} />
-				{syncing === 'recent' ? 'Syncing…' : 'Sync Shopify'}
-			</Button>
-			<Button type="submit" name="mode" value="full" variant="outline" disabled={!!syncing}>
-				{syncing === 'full' ? 'Syncing everything…' : 'Full sync (orders + products)'}
-			</Button>
-		</form>
 	</div>
 
 	{#if data.totals}

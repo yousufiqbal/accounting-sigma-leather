@@ -2,7 +2,6 @@
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Upload from '@lucide/svelte/icons/upload';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -17,7 +16,6 @@
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
-	let syncing = $state<string | null>(null);
 	let uploading = $state(false);
 
 	const COURIER_LABEL: Record<string, string> = { postex: 'PostEx', dex: 'DEX', manual: 'Manual' };
@@ -105,32 +103,6 @@
 		<div class="flex flex-wrap items-center gap-2">
 			<form
 				method="POST"
-				action={formAction('sync')}
-				use:enhance={({ formData }) => {
-					syncing = String(formData.get('mode'));
-					return async ({ update }) => {
-						await update({ reset: false });
-						syncing = null;
-					};
-				}}
-				class="flex gap-2"
-			>
-				<Button type="submit" name="mode" value="recent" disabled={!data.postexReady || !!syncing}>
-					<RefreshCw class={syncing === 'recent' ? 'animate-spin' : ''} />
-					{syncing === 'recent' ? 'Syncing…' : 'Sync PostEx'}
-				</Button>
-				<Button
-					type="submit"
-					name="mode"
-					value="full"
-					variant="outline"
-					disabled={!data.postexReady || !!syncing}
-				>
-					{syncing === 'full' ? 'Syncing history…' : 'Full history'}
-				</Button>
-			</form>
-			<form
-				method="POST"
 				action={formAction('upload')}
 				enctype="multipart/form-data"
 				use:enhance={() => {
@@ -163,7 +135,6 @@
 			</form>
 		</div>
 	</div>
-
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
 		<Stat label="Delivered ({monthLabel(data.month)})">{totals.delivered}</Stat>

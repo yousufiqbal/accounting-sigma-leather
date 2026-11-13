@@ -80,19 +80,24 @@
 				}}
 			>
 				<Button type="submit" disabled={blocked || busy}>
-					{#if busy}<LoaderCircle class="animate-spin" /> Importing…{:else}{nothingToDo ? 'Mark file as imported' : 'Import'}{/if}
+					{#if busy}<LoaderCircle class="animate-spin" /> Importing…{:else}{nothingToDo
+							? 'Mark file as imported'
+							: 'Import'}{/if}
 				</Button>
 			</form>
 		</div>
 	</div>
 
-
 	{#if busy}
-		<div class="flex items-center gap-3 rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-info" role="status">
+		<div
+			class="flex items-center gap-3 rounded-lg border border-info/30 bg-info-soft p-3 text-sm text-info"
+			role="status"
+		>
 			<LoaderCircle class="size-4 shrink-0 animate-spin" />
 			<span>
-				Importing {data.counts.new + data.counts.updated} parcel changes ({data.rows.length} rows checked), then linking
-				orders and updating deliveries… <b class="num">{elapsed}s</b>. Large files can take a minute — keep this tab open.
+				Importing {data.counts.new + data.counts.updated} parcel changes ({data.rows.length} rows checked),
+				then linking orders and updating deliveries… <b class="num">{elapsed}s</b>. Large files can
+				take a minute — keep this tab open.
 			</span>
 		</div>
 	{/if}
