@@ -24,6 +24,16 @@
 	let { data, children }: LayoutProps = $props();
 	let logoutForm = $state<HTMLFormElement>();
 
+	/** Pages whose numbers follow the month picker; elsewhere it's hidden. */
+	const MONTH_PAGES = [
+		'/(app)',
+		'/(app)/reports',
+		'/(app)/orders',
+		'/(app)/couriers',
+		'/(app)/expenses'
+	];
+	const usesMonth = $derived(MONTH_PAGES.includes(page.route.id ?? ''));
+
 	/** Panel-wide toasts: every form action answers with { saved } or { error }. */
 	let lastForm: unknown = null;
 	$effect(() => {
@@ -219,25 +229,27 @@
 			<div class="ml-auto">
 				<SyncButton last={data.sync.last} lastDex={data.sync.lastDex} />
 			</div>
-			<div class="flex items-center rounded-lg border bg-card p-0.5 shadow-xs">
-				<Button variant="ghost" size="icon-sm" href={monthHref(-1)} aria-label="Previous month">
-					<ChevronLeft />
-				</Button>
-				<span class="flex min-w-36 items-center justify-center gap-1.5 text-sm font-medium">
-					{#if navigating.to && navigating.to.url.searchParams.get('m') !== data.month}
-						<LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
-						{monthLabel(navigating.to.url.searchParams.get('m') ?? data.month)}
-					{:else}
-						{monthLabel(data.month)}
-					{/if}
-					{#if !navigating.to && data.month === currentMonth()}
-						<span class="size-1.5 rounded-full bg-success" title="Current month"></span>
-					{/if}
-				</span>
-				<Button variant="ghost" size="icon-sm" href={monthHref(1)} aria-label="Next month">
-					<ChevronRight />
-				</Button>
-			</div>
+			{#if usesMonth}
+				<div class="flex items-center rounded-lg border bg-card p-0.5 shadow-xs">
+					<Button variant="ghost" size="icon-sm" href={monthHref(-1)} aria-label="Previous month">
+						<ChevronLeft />
+					</Button>
+					<span class="flex min-w-36 items-center justify-center gap-1.5 text-sm font-medium">
+						{#if navigating.to && navigating.to.url.searchParams.get('m') !== data.month}
+							<LoaderCircle class="size-3.5 animate-spin text-muted-foreground" />
+							{monthLabel(navigating.to.url.searchParams.get('m') ?? data.month)}
+						{:else}
+							{monthLabel(data.month)}
+						{/if}
+						{#if !navigating.to && data.month === currentMonth()}
+							<span class="size-1.5 rounded-full bg-success" title="Current month"></span>
+						{/if}
+					</span>
+					<Button variant="ghost" size="icon-sm" href={monthHref(1)} aria-label="Next month">
+						<ChevronRight />
+					</Button>
+				</div>
+			{/if}
 		</header>
 		<main
 			class={[

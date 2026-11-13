@@ -93,13 +93,20 @@ export const load: PageServerLoad = async ({ url }) => {
 		best: (r) => r.sold > 0,
 		all: () => true
 	};
-	const counts = Object.fromEntries(VIEWS.map((k) => [k, rows.filter(inView[k]).length])) as Record<View, number>;
+	const counts = Object.fromEntries(VIEWS.map((k) => [k, rows.filter(inView[k]).length])) as Record<
+		View,
+		number
+	>;
 	let list = rows.filter((r) => inView[view](r) && match(r));
 	if (view === 'best') list = list.sort((a, b) => b.sold - a.sold);
 	else if (view === 'losing' || view === 'below') {
 		// Products with the biggest monthly money at stake first, variants kept together.
 		const weight = new Map<string, number>();
-		for (const r of list) weight.set(r.productId, (weight.get(r.productId) ?? 0) + r.sold * Math.abs(r.profit ?? 0) + 1);
+		for (const r of list)
+			weight.set(
+				r.productId,
+				(weight.get(r.productId) ?? 0) + r.sold * Math.abs(r.profit ?? 0) + 1
+			);
 		list = list.sort(
 			(a, b) =>
 				(weight.get(b.productId) ?? 0) - (weight.get(a.productId) ?? 0) ||
@@ -124,7 +131,10 @@ export const load: PageServerLoad = async ({ url }) => {
 		settings,
 		e,
 		windowDays: WINDOW_DAYS,
-		summary: { weightedMargin: revenue ? profit / revenue : null, monthlyProfit: Math.round((profit * 30) / WINDOW_DAYS) },
+		summary: {
+			weightedMargin: revenue ? profit / revenue : null,
+			monthlyProfit: Math.round((profit * 30) / WINDOW_DAYS)
+		},
 		rows: list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 	};
 };
@@ -148,7 +158,10 @@ export const actions: Actions = {
 			const target = pctField(f, 'targetMargin');
 			if (target === undefined) return fail(400, { error: 'Enter a target margin.' });
 			const overrides: PricingSettings['overrides'] = {};
-			const set = <K extends keyof PricingSettings['overrides']>(k: K, val: PricingSettings['overrides'][K] | undefined) => {
+			const set = <K extends keyof PricingSettings['overrides']>(
+				k: K,
+				val: PricingSettings['overrides'][K] | undefined
+			) => {
 				if (val !== undefined) overrides[k] = val;
 			};
 			set('withholdingPct', pctField(f, 'withholdingPct'));

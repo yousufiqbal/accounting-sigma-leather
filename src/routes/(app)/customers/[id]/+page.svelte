@@ -61,7 +61,12 @@
 			{s.orders}
 		</Stat>
 		<Stat label="Sales">{formatRs(s.sales)}</Stat>
-		<Stat label="Profit" hint={s.delivered ? `Avg ${formatRs(s.avgProfit)} per delivered order` : "No delivered orders"}>
+		<Stat
+			label="Profit"
+			hint={s.delivered
+				? `Avg ${formatRs(s.avgProfit)} per delivered order`
+				: 'No delivered orders'}
+		>
 			<span class={s.profit < 0 ? 'text-danger' : ''}>{formatRs(s.profit)}</span>
 		</Stat>
 		<Stat label="Return rate" hint="{s.advance} paid in advance">

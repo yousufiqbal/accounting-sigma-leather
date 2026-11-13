@@ -73,7 +73,7 @@
 			<Button href="/orders/in-progress" variant="outline">
 				<Truck /> In progress ({data.openCount})
 			</Button>
-			<form method="GET" data-sveltekit-keepfocus>
+			<form method="GET" class="w-full sm:w-auto" data-sveltekit-keepfocus>
 				{#each [...page.url.searchParams].filter(([k]) => k === 'm') as [k, v] (k)}
 					<input type="hidden" name={k} value={v} />
 				{/each}
@@ -81,7 +81,7 @@
 					name="q"
 					value={data.q}
 					placeholder="Find order # (any month)"
-					class="h-9 w-56"
+					class="h-9 w-full sm:w-56"
 					type="search"
 				/>
 			</form>
@@ -116,7 +116,7 @@
 			<Stat label="Sales (incl. shipping)">{formatRs(t.sales)}</Stat>
 			<Stat
 				label="Order profit{t.estimated ? ' (est.)' : ''}"
-				hint="Sales − product cost − courier fees − courier tax. Ads, salaries and other expenses are on Reports."
+				hint="Before ads, salaries and other expenses"
 			>
 				<span class={t.profit < 0 ? 'text-danger' : ''}>{formatRs(t.profit)}</span>
 				<span class="text-sm font-normal text-muted-foreground">{pct(t.profit / t.sales)}</span>

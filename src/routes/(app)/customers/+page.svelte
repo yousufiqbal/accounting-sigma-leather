@@ -47,7 +47,7 @@
 				Profit per Shopify customer, all time. Same order profit as the Orders page.
 			</p>
 		</div>
-		<form method="GET" data-sveltekit-keepfocus>
+		<form method="GET" class="w-full sm:w-auto" data-sveltekit-keepfocus>
 			{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, v] (k)}
 				<input type="hidden" name={k} value={v} />
 			{/each}
@@ -55,7 +55,7 @@
 				name="q"
 				value={data.q}
 				placeholder="Name, phone or city"
-				class="h-9 w-56"
+				class="h-9 w-full sm:w-56"
 				type="search"
 			/>
 		</form>

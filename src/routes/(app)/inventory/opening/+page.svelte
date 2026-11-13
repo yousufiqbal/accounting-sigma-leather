@@ -29,7 +29,9 @@
 	const fxRs = $derived(data.rates.rmbFx / 10_000);
 	const ddpRs = $derived(data.rates.ddpPerKg / 100);
 	const ratesSet = $derived(data.rates.rmbFx > 0 && data.rates.ddpPerKg > 0);
-	const pct = $derived(data.progress.inStock ? Math.round((data.progress.costed / data.progress.inStock) * 100) : 100);
+	const pct = $derived(
+		data.progress.inStock ? Math.round((data.progress.costed / data.progress.inStock) * 100) : 100
+	);
 
 	const original = (r: Row): Edit => ({
 		price: r.cnPrice === null ? '' : String(r.cnPrice / 100),
@@ -55,7 +57,12 @@
 	}
 	const costChanged = (r: Row, e: Edit) => {
 		const o = original(r);
-		return e.price.trim() !== o.price || e.currency !== o.currency || e.ok !== o.ok || e.ddp.trim() !== o.ddp;
+		return (
+			e.price.trim() !== o.price ||
+			e.currency !== o.currency ||
+			e.ok !== o.ok ||
+			e.ddp.trim() !== o.ddp
+		);
 	};
 	const weightG = (r: Row) => {
 		const w = Number(cur(r).weight.replace(/,/g, ''));
@@ -63,7 +70,8 @@
 	};
 
 	/** Automatic DDP per piece (paisa): weight × rate; local (Rs) prices default to 0. */
-	const autoDdp = (r: Row, e: Edit) => (e.currency === 'PKR' ? 0 : Math.round((weightG(r) / 1000) * ddpRs * 100));
+	const autoDdp = (r: Row, e: Edit) =>
+		e.currency === 'PKR' ? 0 : Math.round((weightG(r) / 1000) * ddpRs * 100);
 	function ddpUsed(r: Row): number {
 		const e = cur(r);
 		const d = Number(e.ddp.replace(/,/g, ''));
@@ -91,19 +99,27 @@
 		return { cost: 0, source: 'none' };
 	}
 
-	const siblings = (r: Row) => data.rows.filter((x) => x.productId === r.productId && x.id !== r.id);
+	const siblings = (r: Row) =>
+		data.rows.filter((x) => x.productId === r.productId && x.id !== r.id);
 	function copyToSiblings(r: Row, what: 'price' | 'weight') {
 		const e = cur(r);
 		for (const s of siblings(r))
-			set(s, what === 'price' ? { price: e.price, currency: e.currency, ddp: e.ddp } : { weight: e.weight });
+			set(
+				s,
+				what === 'price'
+					? { price: e.price, currency: e.currency, ddp: e.ddp }
+					: { weight: e.weight }
+			);
 	}
-	const firstOfProduct = (r: Row, i: number) => i === 0 || data.rows[i - 1].productId !== r.productId;
+	const firstOfProduct = (r: Row, i: number) =>
+		i === 0 || data.rows[i - 1].productId !== r.productId;
 
-	const SOURCE: Record<string, { tone: 'success' | 'warning' | 'info' | 'danger'; label: string }> = {
-		estimated: { tone: 'warning', label: 'estimated' },
-		shopify: { tone: 'info', label: 'Shopify cost' },
-		none: { tone: 'danger', label: 'missing' }
-	};
+	const SOURCE: Record<string, { tone: 'success' | 'warning' | 'info' | 'danger'; label: string }> =
+		{
+			estimated: { tone: 'warning', label: 'estimated' },
+			shopify: { tone: 'info', label: 'Shopify cost' },
+			none: { tone: 'danger', label: 'missing' }
+		};
 
 	function href(changes: Record<string, string | number | null>) {
 		const p = new URLSearchParams(page.url.searchParams.toString());
@@ -127,7 +143,9 @@
 	const COLS = ['weight', 'price', 'ddp'] as const;
 	type Col = (typeof COLS)[number];
 	function focusCell(row: number, col: string) {
-		const el = document.querySelector<HTMLInputElement>(`input[data-row="${row}"][data-col="${col}"]`);
+		const el = document.querySelector<HTMLInputElement>(
+			`input[data-row="${row}"][data-col="${col}"]`
+		);
 		if (el) {
 			el.focus();
 			el.select();
@@ -171,36 +189,58 @@
 		focusCell(Math.min(start + lines.length, data.rows.length - 1), col);
 	}
 
-	const act =
-		(name: string, after?: () => void) =>
-		() => {
-			busy = name;
-			return async ({ update, result }: { update: (o?: { reset?: boolean }) => Promise<void>; result: { type: string } }) => {
-				await update({ reset: false });
-				busy = null;
-				if (result.type === 'success') after?.();
-			};
+	const act = (name: string, after?: () => void) => () => {
+		busy = name;
+		return async ({
+			update,
+			result
+		}: {
+			update: (o?: { reset?: boolean }) => Promise<void>;
+			result: { type: string };
+		}) => {
+			await update({ reset: false });
+			busy = null;
+			if (result.type === 'success') after?.();
 		};
+	};
 </script>
 
 <div class="grid gap-6 pb-20">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<a href="/inventory?m={page.url.searchParams.get('m') ?? ''}" class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
+			<a
+				href="/inventory?m={page.url.searchParams.get('m') ?? ''}"
+				class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
 				><ArrowLeft class="size-3.5" /> Inventory</a
 			>
 			<h1 class="text-2xl font-semibold tracking-tight">Opening costs</h1>
 			<p class="text-sm text-muted-foreground">
-				Costs for stock you had before the panel. Products drop off this list once a purchase gives them a real cost.
+				Costs for stock you had before the panel. Products drop off this list once a purchase gives
+				them a real cost.
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
-			<Button variant="outline" href="/inventory/costs.csv" data-sveltekit-reload><Download /> Download sheet</Button>
-			<form method="POST" action={formAction('upload')} enctype="multipart/form-data" use:enhance={act('upload')}>
-				<label class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs hover:bg-muted">
+			<Button variant="outline" href="/inventory/costs.csv" data-sveltekit-reload
+				><Download /> Download sheet</Button
+			>
+			<form
+				method="POST"
+				action={formAction('upload')}
+				enctype="multipart/form-data"
+				use:enhance={act('upload')}
+			>
+				<label
+					class="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs hover:bg-muted"
+				>
 					<Upload class="size-4" />
 					{busy === 'upload' ? 'Importing…' : 'Upload filled sheet'}
-					<input type="file" name="file" accept=".csv,.xlsx" class="sr-only" onchange={(e) => e.currentTarget.form?.requestSubmit()} />
+					<input
+						type="file"
+						name="file"
+						accept=".csv,.xlsx"
+						class="sr-only"
+						onchange={(e) => e.currentTarget.form?.requestSubmit()}
+					/>
 				</label>
 			</form>
 		</div>
@@ -210,8 +250,13 @@
 		<Card.Root size="sm">
 			<Card.Content class="grid gap-2">
 				<div class="flex items-baseline justify-between gap-3 text-sm">
-					<span><b class="num">{data.progress.costed}</b> of <b class="num">{data.progress.inStock}</b> in-stock products have a cost</span>
-					<span class={['num font-medium', pct === 100 ? 'text-success' : 'text-muted-foreground']}>{pct}%</span>
+					<span
+						><b class="num">{data.progress.costed}</b> of <b class="num">{data.progress.inStock}</b> in-stock
+						products have a cost</span
+					>
+					<span class={['num font-medium', pct === 100 ? 'text-success' : 'text-muted-foreground']}
+						>{pct}%</span
+					>
 				</div>
 				<div class="h-2 overflow-hidden rounded-full bg-muted">
 					<div class="h-full rounded-full bg-success transition-[width]" style:width="{pct}%"></div>
@@ -220,25 +265,54 @@
 		</Card.Root>
 		<Card.Root size="sm">
 			<Card.Content>
-				<form method="POST" action={formAction('rates')} use:enhance={act('rates')} class="flex flex-wrap items-end gap-3">
+				<form
+					method="POST"
+					action={formAction('rates')}
+					use:enhance={act('rates')}
+					class="flex flex-wrap items-end gap-3"
+				>
 					<div class="grid gap-1.5">
 						<Label for="fx">Rs per 1 yuan</Label>
-						<Input id="fx" name="fx" inputmode="decimal" class="w-28" value={fxRs || ''} placeholder="e.g. 44.2" />
+						<Input
+							id="fx"
+							name="fx"
+							inputmode="decimal"
+							class="w-28"
+							value={fxRs || ''}
+							placeholder="e.g. 44.2"
+						/>
 					</div>
 					<div class="grid gap-1.5">
 						<Label for="ddp">DDP Rs per kg</Label>
-						<Input id="ddp" name="ddp" inputmode="decimal" class="w-28" value={ddpRs || ''} placeholder="e.g. 3400" />
+						<Input
+							id="ddp"
+							name="ddp"
+							inputmode="decimal"
+							class="w-28"
+							value={ddpRs || ''}
+							placeholder="e.g. 3400"
+						/>
 					</div>
-					<Button type="submit" variant="outline" disabled={!!busy}>{busy === 'rates' ? 'Saving…' : 'Save rates'}</Button>
+					<Button type="submit" variant="outline" disabled={!!busy}
+						>{busy === 'rates' ? 'Saving…' : 'Save rates'}</Button
+					>
 				</form>
-				{#if !ratesSet}<p class="mt-2 text-xs text-warning">Set both rates — yuan prices can't be costed without them.</p>{/if}
+				{#if !ratesSet}<p class="mt-2 text-xs text-warning">
+						Set both rates — yuan prices can't be costed without them.
+					</p>{/if}
 			</Card.Content>
 		</Card.Root>
 	</div>
 
 	{#if !data.openingRecorded}
-		<div class="flex flex-wrap items-center gap-3 rounded-lg border border-info/30 bg-info-soft px-4 py-2.5 text-sm text-info">
-			<span>Opening stock not recorded yet — today's Shopify on-hand ({data.units.toLocaleString('en-PK')} units) becomes the starting point. Done once.</span>
+		<div
+			class="flex flex-wrap items-center gap-3 rounded-lg border border-info/30 bg-info-soft px-4 py-2.5 text-sm text-info"
+		>
+			<span
+				>Opening stock not recorded yet — today's Shopify on-hand ({data.units.toLocaleString(
+					'en-PK'
+				)} units) becomes the starting point. Done once.</span
+			>
 			<form
 				method="POST"
 				action={formAction('opening')}
@@ -253,7 +327,9 @@
 					return act('opening')();
 				}}
 			>
-				<Button type="submit" size="sm" variant="outline" disabled={!!busy}>Record opening stock</Button>
+				<Button type="submit" size="sm" variant="outline" disabled={!!busy}
+					>Record opening stock</Button
+				>
 			</form>
 		</div>
 	{/if}
@@ -262,139 +338,190 @@
 		<Card.Header class="gap-3" data-sveltekit-noscroll>
 			<div class="flex flex-wrap items-center gap-1">
 				{#each views as view (view.id)}
-					<Button href={href({ view: view.id })} size="sm" variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button>
+					<Button
+						href={href({ view: view.id })}
+						size="sm"
+						variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button
+					>
 				{/each}
-				<form method="GET" class="ml-auto" data-sveltekit-keepfocus>
+				<form method="GET" class="w-full sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
 					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
 						<input type="hidden" name={k} value={val} />
 					{/each}
-					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-44" />
+					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
 				</form>
 			</div>
 			<Card.Description>
-				Buying price per piece (¥ from China, Rs from Pakistan). Enter/↓ = next row · paste a column from
-				Excel to fill down · Ctrl+S saves. Weight is saved to Shopify too. DDP / pc = weight × DDP rate unless you type one —
-				“Local” = 0 for items bought in Pakistan; amber = DDP above 2× the goods cost.
+				Buying price per piece (¥ from China, Rs from Pakistan). Enter/↓ = next row · paste a column
+				from Excel to fill down · Ctrl+S saves. Weight is saved to Shopify too. DDP / pc = weight ×
+				DDP rate unless you type one — “Local” = 0 for items bought in Pakistan; amber = DDP above
+				2× the goods cost.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
 			<!-- Spreadsheet-style entry: Enter/↓/↑ move between rows, paste from Excel fills down/across. -->
 			<div role="presentation" onkeydown={gridKeys} onpaste={gridPaste}>
-			<Table.Root>
-				<Table.Header>
-					<Table.Row>
-						<Table.Head class="pl-6">Product</Table.Head>
-						<Table.Head class="text-right">On hand</Table.Head>
-						<Table.Head>Weight (g)</Table.Head>
-						<Table.Head>Buying price</Table.Head>
-						<Table.Head>DDP / pc</Table.Head>
-						<Table.Head class="text-right">Cost</Table.Head>
-						<Table.Head class="pr-6 text-right">Stock value</Table.Head>
-					</Table.Row>
-				</Table.Header>
-				<Table.Body>
-					{#each data.rows as r, i (r.id)}
-						{@const e = cur(r)}
-						{@const used = costUsed(r)}
-						<Table.Row class={edits[r.id] ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-72 pl-6">
-								<div class="flex items-center gap-3">
-									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
-									<div class="min-w-0">
-										<div class={['truncate', firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground']}>{r.productTitle}</div>
-										<div class="truncate text-xs text-muted-foreground">{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}</div>
+				<Table.Root>
+					<Table.Header>
+						<Table.Row>
+							<Table.Head class="pl-6">Product</Table.Head>
+							<Table.Head class="text-right">On hand</Table.Head>
+							<Table.Head>Weight (g)</Table.Head>
+							<Table.Head>Buying price</Table.Head>
+							<Table.Head>DDP / pc</Table.Head>
+							<Table.Head class="text-right">Cost</Table.Head>
+							<Table.Head class="pr-6 text-right">Stock value</Table.Head>
+						</Table.Row>
+					</Table.Header>
+					<Table.Body>
+						{#each data.rows as r, i (r.id)}
+							{@const e = cur(r)}
+							{@const used = costUsed(r)}
+							<Table.Row class={edits[r.id] ? 'bg-warning-soft/40' : ''}>
+								<Table.Cell class="max-w-72 pl-6">
+									<div class="flex items-center gap-3">
+										<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
+										<div class="min-w-0">
+											<div
+												class={[
+													'truncate',
+													firstOfProduct(r, i) ? 'font-medium' : 'text-muted-foreground'
+												]}
+											>
+												{r.productTitle}
+											</div>
+											<div class="truncate text-xs text-muted-foreground">
+												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+											</div>
+										</div>
 									</div>
-								</div>
-							</Table.Cell>
-							<Table.Cell class="num text-right">{r.onHand ?? 0}</Table.Cell>
-							<Table.Cell>
-								<div class="flex items-center gap-1">
-									<Input
-										value={e.weight}
-										oninput={(ev) => set(r, { weight: ev.currentTarget.value })}
-										inputmode="numeric"
-										placeholder="g"
-										class={['h-8 w-20 text-right', !e.weight && 'border-danger/60']}
-										aria-label="Weight in grams"
-										data-col="weight"
-										data-row={i}
-										onfocus={(ev) => ev.currentTarget.select()}
-									/>
-									{#if e.weight && siblings(r).length && firstOfProduct(r, i)}
-										<Button size="icon-sm" variant="ghost" title="Same weight for all variants" onclick={() => copyToSiblings(r, 'weight')}><CopyCheck /></Button>
-									{/if}
-								</div>
-							</Table.Cell>
-							<Table.Cell>
-								<div class="flex items-center gap-1">
-									<Input
-										value={e.price}
-										oninput={(ev) => set(r, { price: ev.currentTarget.value })}
-										inputmode="decimal"
-										class="h-8 w-24 text-right"
-										aria-label="Buying price for {r.productTitle} {r.variantTitle ?? ''}"
-										data-col="price"
-										data-row={i}
-										onfocus={(ev) => ev.currentTarget.select()}
-									/>
-									<select
-										class="h-8 rounded-md border bg-background px-1.5 text-sm"
-										value={e.currency}
-										onchange={(ev) => set(r, { currency: ev.currentTarget.value as 'RMB' | 'PKR' })}
-										aria-label="Currency"
-									>
-										<option value="RMB">¥</option>
-										<option value="PKR">Rs</option>
-									</select>
-									{#if e.price && siblings(r).length && firstOfProduct(r, i)}
-										<Button size="icon-sm" variant="ghost" title="Same price for all variants" onclick={() => copyToSiblings(r, 'price')}><CopyCheck /></Button>
-									{/if}
-								</div>
-							</Table.Cell>
-							<Table.Cell>
-								{#if e.price}
+								</Table.Cell>
+								<Table.Cell class="num text-right">{r.onHand ?? 0}</Table.Cell>
+								<Table.Cell>
 									<div class="flex items-center gap-1">
 										<Input
-											value={e.ddp}
-											oninput={(ev) => set(r, { ddp: ev.currentTarget.value })}
-											placeholder={(autoDdp(r, e) / 100).toFixed(0)}
-											inputmode="decimal"
-											title="Blank = weight × DDP rate. Type 0 for locally bought items."
-											class={['h-8 w-20 text-right', ddpHigh(r) && 'border-warning text-warning placeholder:text-warning']}
-											aria-label="DDP per piece"
-											data-col="ddp"
+											value={e.weight}
+											oninput={(ev) => set(r, { weight: ev.currentTarget.value })}
+											inputmode="numeric"
+											placeholder="g"
+											class={['h-8 w-20 text-right', !e.weight && 'border-danger/60']}
+											aria-label="Weight in grams"
+											data-col="weight"
 											data-row={i}
 											onfocus={(ev) => ev.currentTarget.select()}
 										/>
-										{#if e.ddp.trim() !== '0'}
-											<Button size="xs" variant="ghost" onclick={() => set(r, { ddp: '0' })}>Local</Button>
-										{:else}
-											<Button size="xs" variant="ghost" onclick={() => set(r, { ddp: '' })}>Auto</Button>
+										{#if e.weight && siblings(r).length && firstOfProduct(r, i)}
+											<Button
+												size="icon-sm"
+												variant="ghost"
+												title="Same weight for all variants"
+												onclick={() => copyToSiblings(r, 'weight')}><CopyCheck /></Button
+											>
 										{/if}
 									</div>
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right">
-								<Money paisa={used.cost} muted />
-								<div class="mt-0.5"><StatusBadge tone={SOURCE[used.source].tone} label={SOURCE[used.source].label} /></div>
-							</Table.Cell>
-							<Table.Cell class="pr-6 text-right"><Money paisa={Math.max(0, r.onHand ?? 0) * used.cost} muted /></Table.Cell>
-						</Table.Row>
-					{:else}
-						<Table.Row>
-							<Table.Cell colspan={7} class="py-10 text-center text-muted-foreground">Nothing here — well done.</Table.Cell>
-						</Table.Row>
-					{/each}
-				</Table.Body>
-			</Table.Root>
+								</Table.Cell>
+								<Table.Cell>
+									<div class="flex items-center gap-1">
+										<Input
+											value={e.price}
+											oninput={(ev) => set(r, { price: ev.currentTarget.value })}
+											inputmode="decimal"
+											class="h-8 w-24 text-right"
+											aria-label="Buying price for {r.productTitle} {r.variantTitle ?? ''}"
+											data-col="price"
+											data-row={i}
+											onfocus={(ev) => ev.currentTarget.select()}
+										/>
+										<select
+											class="h-8 rounded-md border bg-background px-1.5 text-sm"
+											value={e.currency}
+											onchange={(ev) =>
+												set(r, { currency: ev.currentTarget.value as 'RMB' | 'PKR' })}
+											aria-label="Currency"
+										>
+											<option value="RMB">¥</option>
+											<option value="PKR">Rs</option>
+										</select>
+										{#if e.price && siblings(r).length && firstOfProduct(r, i)}
+											<Button
+												size="icon-sm"
+												variant="ghost"
+												title="Same price for all variants"
+												onclick={() => copyToSiblings(r, 'price')}><CopyCheck /></Button
+											>
+										{/if}
+									</div>
+								</Table.Cell>
+								<Table.Cell>
+									{#if e.price}
+										<div class="flex items-center gap-1">
+											<Input
+												value={e.ddp}
+												oninput={(ev) => set(r, { ddp: ev.currentTarget.value })}
+												placeholder={(autoDdp(r, e) / 100).toFixed(0)}
+												inputmode="decimal"
+												title="Blank = weight × DDP rate. Type 0 for locally bought items."
+												class={[
+													'h-8 w-20 text-right',
+													ddpHigh(r) && 'border-warning text-warning placeholder:text-warning'
+												]}
+												aria-label="DDP per piece"
+												data-col="ddp"
+												data-row={i}
+												onfocus={(ev) => ev.currentTarget.select()}
+											/>
+											{#if e.ddp.trim() !== '0'}
+												<Button size="xs" variant="ghost" onclick={() => set(r, { ddp: '0' })}
+													>Local</Button
+												>
+											{:else}
+												<Button size="xs" variant="ghost" onclick={() => set(r, { ddp: '' })}
+													>Auto</Button
+												>
+											{/if}
+										</div>
+									{:else}<span class="text-muted-foreground">—</span>{/if}
+								</Table.Cell>
+								<Table.Cell class="text-right">
+									<Money paisa={used.cost} muted />
+									<div class="mt-0.5">
+										<StatusBadge
+											tone={SOURCE[used.source].tone}
+											label={SOURCE[used.source].label}
+										/>
+									</div>
+								</Table.Cell>
+								<Table.Cell class="pr-6 text-right"
+									><Money paisa={Math.max(0, r.onHand ?? 0) * used.cost} muted /></Table.Cell
+								>
+							</Table.Row>
+						{:else}
+							<Table.Row>
+								<Table.Cell colspan={7} class="py-10 text-center text-muted-foreground"
+									>Nothing here — well done.</Table.Cell
+								>
+							</Table.Row>
+						{/each}
+					</Table.Body>
+				</Table.Root>
 			</div>
 		</Card.Content>
 		{#if data.pageCount > 1}
 			<Card.Footer class="flex items-center justify-between text-sm text-muted-foreground">
 				<span>{data.totalRows} variants · page {data.page} of {data.pageCount}</span>
 				<div class="flex gap-2">
-					<Button size="sm" variant="outline" href={href({ page: data.page - 1 })} disabled={data.page <= 1}>Previous</Button>
-					<Button size="sm" variant="outline" href={href({ page: data.page + 1 })} disabled={data.page >= data.pageCount}>Next</Button>
+					<Button
+						size="sm"
+						variant="outline"
+						href={href({ page: data.page - 1 })}
+						disabled={data.page <= 1}>Previous</Button
+					>
+					<Button
+						size="sm"
+						variant="outline"
+						href={href({ page: data.page + 1 })}
+						disabled={data.page >= data.pageCount}>Next</Button
+					>
 				</div>
 			</Card.Footer>
 		{/if}
@@ -428,12 +555,15 @@
 						id,
 						...x,
 						costChanged: row ? costChanged(row, x) : true,
-						weightChanged: row ? x.weight.trim() !== (row.weightG ? String(row.weightG) : '') : false
+						weightChanged: row
+							? x.weight.trim() !== (row.weightG ? String(row.weightG) : '')
+							: false
 					};
 				})
 			)}
 		/>
-		<span class="text-sm text-muted-foreground">{dirty} unsaved change{dirty === 1 ? '' : 's'}</span>
+		<span class="text-sm text-muted-foreground">{dirty} unsaved change{dirty === 1 ? '' : 's'}</span
+		>
 		<Button type="button" variant="ghost" onclick={() => (edits = {})}>Discard</Button>
 		<Button type="submit" disabled={!!busy}>{busy === 'save' ? 'Saving…' : 'Save'}</Button>
 	</form>

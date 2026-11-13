@@ -14,7 +14,12 @@ export const load: PageServerLoad = async () => {
 	const batches = (await Promise.all(list.map((b) => loadBatch(b.id)))).filter((b) => b !== null);
 	return {
 		rates: await getRates(),
-		batches: batches.map((b) => ({ ...b.batch, totals: b.totals, items: b.items.length, ddpPending: b.shipment.ddpPending }))
+		batches: batches.map((b) => ({
+			...b.batch,
+			totals: b.totals,
+			items: b.items.length,
+			ddpPending: b.shipment.ddpPending
+		}))
 	};
 };
 
@@ -26,7 +31,10 @@ export const actions: Actions = {
 		const currency = f.get('currency') === 'PKR' ? 'PKR' : 'RMB';
 		let fx: number, ddp: number;
 		try {
-			fx = currency === 'PKR' ? 10_000 : Math.round(Number(String(f.get('fx')).replace(/,/g, '')) * 10_000);
+			fx =
+				currency === 'PKR'
+					? 10_000
+					: Math.round(Number(String(f.get('fx')).replace(/,/g, '')) * 10_000);
 			ddp = toPaisa(String(f.get('ddp') ?? '0'));
 			if (!Number.isFinite(fx) || fx <= 0) throw new Error();
 		} catch {

@@ -15,7 +15,11 @@ export const GET: RequestHandler = async () => {
 		.select()
 		.from(v)
 		.where(eq(v.status, 'ACTIVE'))
-		.orderBy(desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`), asc(v.productTitle), asc(v.variantTitle));
+		.orderBy(
+			desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`),
+			asc(v.productTitle),
+			asc(v.variantTitle)
+		);
 	const head = [
 		'variant_id',
 		'product',

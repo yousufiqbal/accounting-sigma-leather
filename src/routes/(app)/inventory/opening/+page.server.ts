@@ -40,12 +40,16 @@ export const load: PageServerLoad = async ({ url }) => {
 	const rates = await getRates();
 	// Active products not yet costed by a purchase (drafts/archived are leftovers).
 	const base = and(eq(v.status, 'ACTIVE'), ne(v.costSource, 'batch'));
-	const where_ = (k: View) => and(base, k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
+	const where_ = (k: View) =>
+		and(base, k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
 	const filters = [where_(view)];
 	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));
 	const where = and(...filters.filter(Boolean));
 
-	const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where);
+	const [{ n }] = await db
+		.select({ n: sql<number>`count(*)` })
+		.from(v)
+		.where(where);
 	const rows = await db
 		.select({
 			id: v.id,
@@ -79,7 +83,10 @@ export const load: PageServerLoad = async ({ url }) => {
 	const counts = Object.fromEntries(
 		await Promise.all(
 			VIEWS.map(async (k) => {
-				const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where_(k));
+				const [{ n }] = await db
+					.select({ n: sql<number>`count(*)` })
+					.from(v)
+					.where(where_(k));
 				return [k, n] as const;
 			})
 		)
@@ -88,7 +95,10 @@ export const load: PageServerLoad = async ({ url }) => {
 	// Progress: in-stock active products that have any cost.
 	const [progress] = (await db.all(sql`
 		select count(*) as inStock, sum(case when avg_cost_paisa > 0 then 1 else 0 end) as costed
-		from variants where status = 'ACTIVE' and shopify_on_hand > 0`)) as { inStock: number; costed: number }[];
+		from variants where status = 'ACTIVE' and shopify_on_hand > 0`)) as {
+		inStock: number;
+		costed: number;
+	}[];
 
 	const [{ opening }] = await db
 		.select({ opening: sql<number>`count(*)` })
@@ -107,7 +117,9 @@ export const load: PageServerLoad = async ({ url }) => {
 		openingRecorded: opening > 0,
 		units: Number(
 			(
-				(await db.all(sql`select coalesce(sum(shopify_on_hand), 0) as u from variants where status = 'ACTIVE' and shopify_on_hand > 0`)) as {
+				(await db.all(
+					sql`select coalesce(sum(shopify_on_hand), 0) as u from variants where status = 'ACTIVE' and shopify_on_hand > 0`
+				)) as {
 					u: number;
 				}[]
 			)[0].u
@@ -197,7 +209,9 @@ export const actions: Actions = {
 		const bytes = new Uint8Array(await file.arrayBuffer());
 		let grid: string[][];
 		try {
-			grid = /\.xlsx$/i.test(file.name) ? parseXlsx(bytes) : parseCsv(new TextDecoder().decode(bytes));
+			grid = /\.xlsx$/i.test(file.name)
+				? parseXlsx(bytes)
+				: parseCsv(new TextDecoder().decode(bytes));
 		} catch (e) {
 			return fail(400, { error: `Could not read file: ${e instanceof Error ? e.message : e}` });
 		}
@@ -212,11 +226,20 @@ export const actions: Actions = {
 		const iW = col('weightg', 'weight');
 		if ((iPrice < 0 && iW < 0) || (iId < 0 && iSku < 0))
 			return fail(400, {
-				error: 'Sheet needs "buying_price" and/or "weight_g", plus "variant_id" or "sku". Use the downloaded sheet.'
+				error:
+					'Sheet needs "buying_price" and/or "weight_g", plus "variant_id" or "sku". Use the downloaded sheet.'
 			});
 
 		const all = await db
-			.select({ id: v.id, sku: v.sku, ok: v.shopifyCostOk, cur: v.estCurrency, price: v.estCnPriceMinor, ddp: v.estDdp, w: v.weightG })
+			.select({
+				id: v.id,
+				sku: v.sku,
+				ok: v.shopifyCostOk,
+				cur: v.estCurrency,
+				price: v.estCnPriceMinor,
+				ddp: v.estDdp,
+				w: v.weightG
+			})
 			.from(v);
 		const byId = new Map(all.map((r) => [r.id, r]));
 		const bySku = new Map(all.filter((r) => r.sku).map((r) => [r.sku!.trim().toLowerCase(), r]));
@@ -254,8 +277,18 @@ export const actions: Actions = {
 				problems.push(`row ${i + 2}: price "${p}" is not a number`);
 				continue;
 			}
-			const cur = iCur >= 0 ? String(row[iCur] ?? '').trim().toUpperCase() : '';
-			const okRaw = iOk >= 0 ? String(row[iOk] ?? '').trim().toLowerCase() : '';
+			const cur =
+				iCur >= 0
+					? String(row[iCur] ?? '')
+							.trim()
+							.toUpperCase()
+					: '';
+			const okRaw =
+				iOk >= 0
+					? String(row[iOk] ?? '')
+							.trim()
+							.toLowerCase()
+					: '';
 			let ddp: number | null | undefined = undefined; // column missing → leave as is
 			if (iDdp >= 0) {
 				const d = String(row[iDdp] ?? '').trim();
@@ -283,13 +316,17 @@ export const actions: Actions = {
 			inputs.push(next);
 		}
 		if (problems.length > 20)
-			return fail(400, { error: `${problems.length} rows have problems, e.g. ${problems.slice(0, 5).join('; ')}` });
+			return fail(400, {
+				error: `${problems.length} rows have problems, e.g. ${problems.slice(0, 5).join('; ')}`
+			});
 		const w = await pushWeights(weights);
 		const r = inputs.length ? await saveCostInputs(inputs) : { changed: 0 };
 		return {
 			saved:
 				`Sheet imported: ${inputs.length} costs changed` +
-				(weights.length ? ` · ${w.done} weights updated in Shopify${w.failed ? ` (${w.failed} failed)` : ''}` : '') +
+				(weights.length
+					? ` · ${w.done} weights updated in Shopify${w.failed ? ` (${w.failed} failed)` : ''}`
+					: '') +
 				` · ${r.changed} costs recalculated.` +
 				(problems.length ? ` Skipped: ${problems.join('; ')}` : '')
 		};

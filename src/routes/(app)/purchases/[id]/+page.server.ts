@@ -24,11 +24,24 @@ export const load: PageServerLoad = async ({ params }) => {
 					imageUrl: v.imageUrl
 				})
 				.from(v)
-				.where(inArray(v.id, b.lines.map((l) => l.variantId)))
+				.where(
+					inArray(
+						v.id,
+						b.lines.map((l) => l.variantId)
+					)
+				)
 		: [];
 	const byId = new Map(vars.map((x) => [x.id, x]));
 	const options = await db
-		.select({ id: v.id, productTitle: v.productTitle, variantTitle: v.variantTitle, sku: v.sku, imageUrl: v.imageUrl, status: v.status, isBundle: v.isBundle })
+		.select({
+			id: v.id,
+			productTitle: v.productTitle,
+			variantTitle: v.variantTitle,
+			sku: v.sku,
+			imageUrl: v.imageUrl,
+			status: v.status,
+			isBundle: v.isBundle
+		})
 		.from(v)
 		.orderBy(asc(v.productTitle), asc(v.variantTitle));
 	return {
@@ -46,7 +59,13 @@ export const load: PageServerLoad = async ({ params }) => {
 		// Draft/archived products are leftovers, and bundles are bought as their components.
 		options: options
 			.filter((o) => o.status === 'ACTIVE' && !o.isBundle)
-			.map((o) => ({ id: o.id, title: o.productTitle, variant: o.variantTitle, sku: o.sku, image: o.imageUrl }))
+			.map((o) => ({
+				id: o.id,
+				title: o.productTitle,
+				variant: o.variantTitle,
+				sku: o.sku,
+				image: o.imageUrl
+			}))
 	};
 };
 
@@ -56,7 +75,9 @@ async function editable(id: string) {
 	if (batch.status === 'landed' || batch.status === 'landing') return null;
 	return batch;
 }
-const LANDED = { error: 'This purchase has arrived (or is being added to stock) and can no longer be changed.' };
+const LANDED = {
+	error: 'This purchase has arrived (or is being added to stock) and can no longer be changed.'
+};
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 /** Add qty to an existing line for the variant, or create one (weight from Shopify). */
@@ -69,7 +90,10 @@ async function addItem(batchId: string, variantId: string, qty: number, priceMin
 	if (existing)
 		await db
 			.update(bi)
-			.set({ qty: existing.qty + qty, unitPriceForeignMinor: priceMinor || existing.unitPriceForeignMinor })
+			.set({
+				qty: existing.qty + qty,
+				unitPriceForeignMinor: priceMinor || existing.unitPriceForeignMinor
+			})
 			.where(eq(bi.id, existing.id));
 	else
 		await db.insert(bi).values({
@@ -115,7 +139,9 @@ export const actions: Actions = {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		const f = await request.formData();
 		const num = (k: string) => {
-			const s = String(f.get(k) ?? '').trim().replace(/,/g, '');
+			const s = String(f.get(k) ?? '')
+				.trim()
+				.replace(/,/g, '');
 			if (s === '') return null;
 			const n = Number(s);
 			if (!Number.isFinite(n) || n < 0) throw new Error(k);
@@ -136,7 +162,10 @@ export const actions: Actions = {
 				ddpTotal: null
 			})
 			.where(eq(schema.importBatches.id, params.id));
-		return { saved: kg === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.' };
+		return {
+			saved:
+				kg === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.'
+		};
 	},
 
 	add: async ({ params, request }) => {
@@ -152,7 +181,8 @@ export const actions: Actions = {
 		} catch {
 			return fail(400, { error: 'Price must be a number.' });
 		}
-		if (!(await addItem(params.id, id, qty, price))) return fail(400, { error: 'Product not found.' });
+		if (!(await addItem(params.id, id, qty, price)))
+			return fail(400, { error: 'Product not found.' });
 		return { added: true }; // quiet: the new line appearing is feedback enough
 	},
 
@@ -186,7 +216,9 @@ export const actions: Actions = {
 			added++;
 		}
 		return bad.length
-			? fail(400, { error: `Added ${added}. Could not read: ${bad.join(', ')} (SKU not found, or qty/price not a number).` })
+			? fail(400, {
+					error: `Added ${added}. Could not read: ${bad.join(', ')} (SKU not found, or qty/price not a number).`
+				})
 			: { saved: `Added ${added} lines.` };
 	},
 
@@ -195,12 +227,14 @@ export const actions: Actions = {
 		const raw = String((await request.formData()).get('rows') ?? '[]');
 		let rows: { id: string; qty: number; price: number; weight: number }[];
 		try {
-			rows = (JSON.parse(raw) as { id: string; qty: string; price: string; weight: string }[]).map((r) => {
-				const qty = Math.trunc(Number(r.qty));
-				const weight = Math.trunc(Number(r.weight));
-				if (!(qty > 0) || !(weight >= 0)) throw new Error();
-				return { id: r.id, qty, price: Math.abs(toPaisa(r.price)), weight };
-			});
+			rows = (JSON.parse(raw) as { id: string; qty: string; price: string; weight: string }[]).map(
+				(r) => {
+					const qty = Math.trunc(Number(r.qty));
+					const weight = Math.trunc(Number(r.weight));
+					if (!(qty > 0) || !(weight >= 0)) throw new Error();
+					return { id: r.id, qty, price: Math.abs(toPaisa(r.price)), weight };
+				}
+			);
 		} catch {
 			return fail(400, { error: 'Quantity, price and weight must be numbers (qty above 0).' });
 		}
@@ -270,7 +304,9 @@ export const actions: Actions = {
 			return {
 				saved:
 					`Landed: ${r.units} units across ${r.items} products added in Shopify, costs updated.` +
-					(r.costFailed ? ` ${r.costFailed} cost updates failed in Shopify — retry from Inventory.` : '')
+					(r.costFailed
+						? ` ${r.costFailed} cost updates failed in Shopify — retry from Inventory.`
+						: '')
 			};
 		} catch (e) {
 			return fail(400, { error: e instanceof Error ? e.message : String(e) });

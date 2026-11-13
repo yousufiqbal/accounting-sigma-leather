@@ -38,7 +38,10 @@ export const load: PageServerLoad = async ({ url }) => {
 	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));
 	const where = and(...filters.filter(Boolean));
 
-	const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where);
+	const [{ n }] = await db
+		.select({ n: sql<number>`count(*)` })
+		.from(v)
+		.where(where);
 	const rows = await db
 		.select({
 			id: v.id,
@@ -75,7 +78,10 @@ export const load: PageServerLoad = async ({ url }) => {
 	const counts = Object.fromEntries(
 		await Promise.all(
 			VIEWS.map(async (k) => {
-				const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(v).where(where_(k));
+				const [{ n }] = await db
+					.select({ n: sql<number>`count(*)` })
+					.from(v)
+					.where(where_(k));
 				return [k, n] as const;
 			})
 		)
@@ -123,7 +129,9 @@ export const load: PageServerLoad = async ({ url }) => {
 		.where(and(eq(sm.type, 'variance'), sql`${sm.reason} is not null`, sql`${sm.at} >= ${since}`))
 		.orderBy(desc(sm.at), asc(v.productTitle))
 		.limit(200);
-	const lastCheck = await db.query.settings.findFirst({ where: eq(schema.settings.key, 'stock_checked_at') });
+	const lastCheck = await db.query.settings.findFirst({
+		where: eq(schema.settings.key, 'stock_checked_at')
+	});
 
 	return {
 		changes,

@@ -71,6 +71,8 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 		? (url.searchParams.get('view') as View)
 		: 'month';
 	const courier = url.searchParams.get('courier');
+	/** Assumed deliveries (A-… parcels, no courier) are hidden from the list unless asked for. */
+	const showAssumed = url.searchParams.get('assumed') === '1';
 	const q = url.searchParams.get('q')?.trim() ?? '';
 	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
@@ -117,6 +119,7 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 	if (view === 'transit') filters.push(inArray(s.status, ['booked', 'in_transit']));
 	if (view === 'attention') filters.push(attentionWhere(thresholds));
 	if (courier === 'postex' || courier === 'dex') filters.push(eq(s.courier, courier));
+	if (!showAssumed) filters.push(sql`not (${s.courier} = 'manual' and ${s.trackingNo} like 'A-%')`);
 	if (q)
 		filters.push(
 			or(
@@ -137,6 +140,7 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 			courier: s.courier,
 			trackingNo: s.trackingNo,
 			orderName: s.orderName,
+			orderId: s.orderId,
 			orderRefRaw: s.orderRefRaw,
 			extraParcel: s.extraParcel,
 			status: s.status,
@@ -169,6 +173,7 @@ export const load: PageServerLoad = async ({ url, parent }) => {
 	return {
 		view,
 		courier: courier ?? 'all',
+		showAssumed,
 		q,
 		page,
 		pageCount: Math.max(1, Math.ceil(totalRows / PAGE_SIZE)),

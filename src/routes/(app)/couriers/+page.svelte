@@ -18,7 +18,11 @@
 	let { data, form }: PageProps = $props();
 	let uploading = $state(false);
 
-	const COURIER_LABEL: Record<string, string> = { postex: 'PostEx', dex: 'DEX', manual: 'Manual' };
+	const COURIER_LABEL: Record<string, string> = {
+		postex: 'PostEx',
+		dex: 'DEX',
+		manual: 'No courier / assumed'
+	};
 
 	/** Link to this page with some params changed (keeps month). */
 	function href(changes: Record<string, string | number | null>) {
@@ -217,11 +221,24 @@
 						{c === 'all' ? 'All couriers' : COURIER_LABEL[c]}
 					</Button>
 				{/each}
-				<form method="GET" class="ml-auto flex gap-2" data-sveltekit-keepfocus>
+				<Button
+					href={href({ assumed: data.showAssumed ? null : '1' })}
+					size="xs"
+					variant={data.showAssumed ? 'secondary' : 'ghost'}
+					title="Orders counted as delivered without courier data (pickup, untracked, 14-day rule)"
+				>
+					{data.showAssumed ? '✓ Showing assumed' : 'Show assumed'}
+				</Button>
+				<form method="GET" class="flex w-full gap-2 sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
 					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, v] (k)}
 						<input type="hidden" name={k} value={v} />
 					{/each}
-					<Input name="q" value={data.q} placeholder="Tracking or order #" class="h-8 w-48" />
+					<Input
+						name="q"
+						value={data.q}
+						placeholder="Tracking or order #"
+						class="h-8 w-full sm:w-48"
+					/>
 				</form>
 			</div>
 		</Card.Header>
@@ -246,7 +263,9 @@
 						<Table.Row>
 							<Table.Cell class="pl-6">
 								{#if p.orderName}
-									<span class="font-medium">#{p.orderName}</span>
+									{#if p.orderId}<a href="/orders/{p.orderName}" class="font-medium hover:underline"
+											>#{p.orderName}</a
+										>{:else}<span class="font-medium">#{p.orderName}</span>{/if}
 									{#if p.extraParcel}<StatusBadge tone="muted" label="extra parcel" />{/if}
 								{:else}
 									<StatusBadge

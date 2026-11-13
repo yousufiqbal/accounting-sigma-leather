@@ -46,7 +46,8 @@
 	const ship = $derived(shipEdit ?? shipSaved);
 	const num = (x: string) => (x.trim() === '' ? null : Number(x.replace(/,/g, '')));
 	const shipDirty = $derived(
-		shipEdit !== null && (num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate))
+		shipEdit !== null &&
+			(num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate))
 	);
 	const dirty = $derived(Object.keys(edits).length);
 
@@ -59,7 +60,8 @@
 	function set(l: Line, patch: Partial<Edit>) {
 		const next = { ...cur(l), ...patch };
 		const o = original(l);
-		if (next.qty === o.qty && next.price === o.price && next.weight === o.weight) delete edits[l.id];
+		if (next.qty === o.qty && next.price === o.price && next.weight === o.weight)
+			delete edits[l.id];
 		else edits[l.id] = next;
 	}
 
@@ -70,52 +72,69 @@
 		landed: { tone: 'success', label: 'landed' }
 	} as const;
 
-	const act =
-		(name: string, after?: () => void) =>
-		() => {
-			busy = name;
-			return async ({
-				update,
-				result
-			}: {
-				update: (o?: { reset?: boolean }) => Promise<void>;
-				result: { type: string };
-			}) => {
-				await update({ reset: name === 'add' || name === 'paste' || name === 'cost' });
-				busy = null;
-				if (result.type === 'success') after?.();
-			};
+	const act = (name: string, after?: () => void) => () => {
+		busy = name;
+		return async ({
+			update,
+			result
+		}: {
+			update: (o?: { reset?: boolean }) => Promise<void>;
+			result: { type: string };
+		}) => {
+			await update({ reset: name === 'add' || name === 'paste' || name === 'cost' });
+			busy = null;
+			if (result.type === 'success') after?.();
 		};
+	};
 </script>
 
 <div class="grid gap-6 pb-20">
 	<div class="flex flex-wrap items-end justify-between gap-3">
 		<div>
-			<a href="/purchases" class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
+			<a
+				href="/purchases"
+				class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
 				><ArrowLeft class="size-3.5" /> Purchases</a
 			>
 			<h1 class="flex items-center gap-2 text-2xl font-semibold tracking-tight">
 				{b.ref}
 				<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
-				{#if data.shipment.ddpPending && !locked}<StatusBadge tone="warning" label="DDP pending" />{/if}
+				{#if data.shipment.ddpPending && !locked}<StatusBadge
+						tone="warning"
+						label="DDP pending"
+					/>{/if}
 			</h1>
 			<p class="text-sm text-muted-foreground">
 				{b.supplier ?? 'No supplier'} ·
-				{isRmb ? `¥1 = Rs ${b.fxRateX10000 / 10_000}` : 'Pakistani supplier (Rs)'} · DDP {formatRs(b.ddpRatePerKg)}/kg
+				{isRmb ? `¥1 = Rs ${b.fxRateX10000 / 10_000}` : 'Pakistani supplier (Rs)'} · DDP {formatRs(
+					b.ddpRatePerKg
+				)}/kg
 				{#if b.paidOn}· paid {b.paidOn}{/if}
 				{#if b.landedOn}· landed {b.landedOn}{/if}
 			</p>
 		</div>
 		{#if retrying}
-			<form method="POST" action={formAction('land')} use:enhance={act('land')} class="flex items-end gap-2">
+			<form
+				method="POST"
+				action={formAction('land')}
+				use:enhance={act('land')}
+				class="flex items-end gap-2"
+			>
 				<input type="hidden" name="date" value={today} />
-				<Button type="submit" disabled={!!busy}>{busy === 'land' ? 'Retrying…' : 'Retry adding to stock'}</Button>
+				<Button type="submit" disabled={!!busy}
+					>{busy === 'land' ? 'Retrying…' : 'Retry adding to stock'}</Button
+				>
 			</form>
 		{/if}
 		{#if !locked}
 			<div class="flex flex-wrap items-end gap-2">
 				{#if b.status === 'draft'}
-					<form method="POST" action={formAction('paid')} use:enhance={act('paid')} class="flex items-end gap-2">
+					<form
+						method="POST"
+						action={formAction('paid')}
+						use:enhance={act('paid')}
+						class="flex items-end gap-2"
+					>
 						<Input type="date" name="date" value={today} class="h-9 w-40" aria-label="Paid on" />
 						<Button type="submit" variant="outline" disabled={!!busy}>Mark paid</Button>
 					</form>
@@ -127,7 +146,10 @@
 					use:enhance={async ({ cancel }) => {
 						if (dirty) {
 							cancel();
-							await notice({ title: 'Unsaved item changes', description: 'Save or discard your item changes first.' });
+							await notice({
+								title: 'Unsaved item changes',
+								description: 'Save or discard your item changes first.'
+							});
 							return;
 						}
 						const ok = await ask({
@@ -148,10 +170,14 @@
 		{/if}
 	</div>
 
-
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-5">
 		<Stat label="Units">{data.totals.units.toLocaleString('en-PK')}</Stat>
-		<Stat label="Item weight" hint={data.shipment.billedWeightG !== null ? `Billed ${(data.shipment.billedWeightG / 1000).toFixed(1)} kg` : 'Box weight not entered'}>
+		<Stat
+			label="Item weight"
+			hint={data.shipment.billedWeightG !== null
+				? `Billed ${(data.shipment.billedWeightG / 1000).toFixed(1)} kg`
+				: 'Box weight not entered'}
+		>
 			{(data.totals.weightG / 1000).toFixed(1)} kg
 		</Stat>
 		<Stat label="Goods">{formatRs(data.totals.goods)}</Stat>
@@ -161,14 +187,38 @@
 
 	<Card.Root size="sm">
 		<Card.Content>
-			<form method="POST" action={formAction('header')} use:enhance={act('header')} class="flex flex-wrap items-end gap-3">
+			<form
+				method="POST"
+				action={formAction('header')}
+				use:enhance={act('header')}
+				class="flex flex-wrap items-end gap-3"
+			>
 				<fieldset disabled={locked} class="contents">
-					<div class="grid gap-1.5"><Label for="ref">Name</Label><Input id="ref" name="ref" value={b.ref} class="w-48" /></div>
-					<div class="grid gap-1.5"><Label for="supplier">Supplier</Label><Input id="supplier" name="supplier" value={b.supplier ?? ''} class="w-44" /></div>
+					<div class="grid gap-1.5">
+						<Label for="ref">Name</Label><Input id="ref" name="ref" value={b.ref} class="w-48" />
+					</div>
+					<div class="grid gap-1.5">
+						<Label for="supplier">Supplier</Label><Input
+							id="supplier"
+							name="supplier"
+							value={b.supplier ?? ''}
+							class="w-44"
+						/>
+					</div>
 					{#if isRmb}
-						<div class="grid gap-1.5"><Label for="fx">Rs per 1 yuan</Label><Input id="fx" name="fx" inputmode="decimal" value={b.fxRateX10000 / 10_000} class="w-28" /></div>
+						<div class="grid gap-1.5">
+							<Label for="fx">Rs per 1 yuan</Label><Input
+								id="fx"
+								name="fx"
+								inputmode="decimal"
+								value={b.fxRateX10000 / 10_000}
+								class="w-28"
+							/>
+						</div>
 					{/if}
-					<div class="grid min-w-48 flex-1 gap-1.5"><Label for="notes">Notes</Label><Input id="notes" name="notes" value={b.notes ?? ''} /></div>
+					<div class="grid min-w-48 flex-1 gap-1.5">
+						<Label for="notes">Notes</Label><Input id="notes" name="notes" value={b.notes ?? ''} />
+					</div>
 					{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>Save</Button>{/if}
 				</fieldset>
 			</form>
@@ -191,7 +241,12 @@
 		</Card.Header>
 		{#if !locked}
 			<Card.Content class="grid gap-3">
-				<form method="POST" action={formAction('add')} use:enhance={act('add', () => (pickedVariant = ''))} class="flex flex-wrap items-end gap-2">
+				<form
+					method="POST"
+					action={formAction('add')}
+					use:enhance={act('add', () => (pickedVariant = ''))}
+					class="flex flex-wrap items-end gap-2"
+				>
 					<div class="grid min-w-72 flex-1 gap-1.5">
 						<Label for="variant-picker">Product</Label>
 						<VariantPicker options={data.options} bind:value={pickedVariant} />
@@ -207,7 +262,12 @@
 					<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
 				</form>
 				{#if showPaste}
-					<form method="POST" action={formAction('paste')} use:enhance={act('paste', () => (showPaste = false))} class="grid gap-2">
+					<form
+						method="POST"
+						action={formAction('paste')}
+						use:enhance={act('paste', () => (showPaste = false))}
+						class="grid gap-2"
+					>
 						<Textarea
 							name="lines"
 							rows={6}
@@ -241,25 +301,46 @@
 						<Table.Row class={edits[l.id] ? 'bg-warning-soft/40' : ''}>
 							<Table.Cell class="max-w-64 pl-6">
 								<div class="flex items-center gap-3">
-									<Thumb src={l.variant?.imageUrl} alt={`${l.variant?.productTitle ?? ''} ${l.variant?.variantTitle ?? ''}`} />
+									<Thumb
+										src={l.variant?.imageUrl}
+										alt={`${l.variant?.productTitle ?? ''} ${l.variant?.variantTitle ?? ''}`}
+									/>
 									<div class="min-w-0">
-										<div class="truncate font-medium">{l.variant?.productTitle ?? 'Deleted product'}</div>
+										<div class="truncate font-medium">
+											{l.variant?.productTitle ?? 'Deleted product'}
+										</div>
 										<div class="truncate text-xs text-muted-foreground">
-											{l.variant?.variantTitle ?? ''}{l.variant?.variantTitle && l.variant?.sku ? ' · ' : ''}{l.variant?.sku ?? ''}
+											{l.variant?.variantTitle ?? ''}{l.variant?.variantTitle && l.variant?.sku
+												? ' · '
+												: ''}{l.variant?.sku ?? ''}
 										</div>
 									</div>
 								</div>
 							</Table.Cell>
 							{#if locked}
 								<Table.Cell class="num text-right">{l.qty}</Table.Cell>
-								<Table.Cell class="num text-right">{(l.unitPriceForeignMinor / 100).toLocaleString('en-PK')}</Table.Cell>
+								<Table.Cell class="num text-right"
+									>{(l.unitPriceForeignMinor / 100).toLocaleString('en-PK')}</Table.Cell
+								>
 								<Table.Cell class="num text-right">{l.unitWeightG}</Table.Cell>
 							{:else}
 								<Table.Cell class="text-right">
-									<Input value={e.qty} oninput={(ev) => set(l, { qty: ev.currentTarget.value })} inputmode="numeric" class="ml-auto h-8 w-16 text-right" aria-label="Quantity" />
+									<Input
+										value={e.qty}
+										oninput={(ev) => set(l, { qty: ev.currentTarget.value })}
+										inputmode="numeric"
+										class="ml-auto h-8 w-16 text-right"
+										aria-label="Quantity"
+									/>
 								</Table.Cell>
 								<Table.Cell class="text-right">
-									<Input value={e.price} oninput={(ev) => set(l, { price: ev.currentTarget.value })} inputmode="decimal" class="ml-auto h-8 w-20 text-right" aria-label="Price" />
+									<Input
+										value={e.price}
+										oninput={(ev) => set(l, { price: ev.currentTarget.value })}
+										inputmode="decimal"
+										class="ml-auto h-8 w-20 text-right"
+										aria-label="Price"
+									/>
 								</Table.Cell>
 								<Table.Cell class="text-right">
 									<Input
@@ -297,7 +378,9 @@
 											}}
 										>
 											<input type="hidden" name="itemId" value={l.id} />
-											<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
+											<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"
+												><Trash /></Button
+											>
 										</form>
 									{/if}
 								</div>
@@ -305,7 +388,9 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={10} class="py-10 text-center text-muted-foreground">No items yet.</Table.Cell>
+							<Table.Cell colspan={10} class="py-10 text-center text-muted-foreground"
+								>No items yet.</Table.Cell
+							>
 						</Table.Row>
 					{/each}
 				</Table.Body>
@@ -318,12 +403,18 @@
 			<Card.Header>
 				<Card.Title>Shipment DDP</Card.Title>
 				<Card.Description>
-					Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split across
-					items by their weight (unit weight × qty), so cartons and packing are shared fairly.
+					Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split
+					across items by their weight (unit weight × qty), so cartons and packing are shared
+					fairly.
 				</Card.Description>
 			</Card.Header>
 			<Card.Content class="grid gap-4">
-				<form method="POST" action={formAction('shipment')} use:enhance={act('shipment', () => (shipEdit = null))} class="flex flex-wrap items-end gap-3">
+				<form
+					method="POST"
+					action={formAction('shipment')}
+					use:enhance={act('shipment', () => (shipEdit = null))}
+					class="flex flex-wrap items-end gap-3"
+				>
 					<fieldset disabled={locked} class="contents">
 						<div class="grid gap-1.5">
 							<Label for="billedKg">Billed box weight (kg)</Label>
@@ -351,14 +442,22 @@
 						{#if !locked}
 							{#if shipDirty}
 								<div class="flex items-center gap-2">
-									<Button type="submit" disabled={!!busy}>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button>
-									<Button type="button" variant="ghost" size="sm" onclick={() => (shipEdit = null)}>Undo</Button>
+									<Button type="submit" disabled={!!busy}
+										>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button
+									>
+									<Button type="button" variant="ghost" size="sm" onclick={() => (shipEdit = null)}
+										>Undo</Button
+									>
 									<span class="text-xs text-warning">Not applied yet</span>
 								</div>
 							{:else if data.shipment.ddpPending}
-								<span class="flex h-9 items-center"><StatusBadge tone="warning" label="DDP pending — enter box weight" /></span>
+								<span class="flex h-9 items-center"
+									><StatusBadge tone="warning" label="DDP pending — enter box weight" /></span
+								>
 							{:else}
-								<span class="flex h-9 items-center gap-1.5 text-sm text-success"><CircleCheck class="size-4" /> Applied to items</span>
+								<span class="flex h-9 items-center gap-1.5 text-sm text-success"
+									><CircleCheck class="size-4" /> Applied to items</span
+								>
 							{/if}
 						{/if}
 					</fieldset>
@@ -367,7 +466,11 @@
 					<div>
 						<span class="text-muted-foreground">DDP to split</span>
 						<div class="num font-medium">
-							{#if data.shipment.ddpTotal !== null}{formatRs(data.shipment.ddpTotal)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning">pending — showing estimate {formatRs(data.totals.ddp)}</span>{/if}
+							{#if data.shipment.ddpTotal !== null}{formatRs(
+									data.shipment.ddpTotal
+								)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning"
+									>pending — showing estimate {formatRs(data.totals.ddp)}</span
+								>{/if}
 						</div>
 					</div>
 					{#if data.shipment.overhead !== null}
@@ -375,15 +478,20 @@
 							<span class="text-muted-foreground">Packing overhead</span>
 							<div class={['num font-medium', data.shipment.overhead < 0 ? 'text-danger' : '']}>
 								{data.shipment.overhead >= 0 ? '+' : ''}{(data.shipment.overhead * 100).toFixed(0)}%
-								<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span>
+								<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span
+								>
 							</div>
 						</div>
 					{/if}
 					{#if data.shipment.itemsWithoutWeight}
-						<div class="text-danger">{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.</div>
+						<div class="text-danger">
+							{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.
+						</div>
 					{/if}
 					{#if data.shipment.overhead !== null && data.shipment.overhead < 0}
-						<div class="text-danger">Billed weight is less than the items' weights — check the item weights.</div>
+						<div class="text-danger">
+							Billed weight is less than the items' weights — check the item weights.
+						</div>
 					{/if}
 				</div>
 			</Card.Content>
@@ -392,26 +500,39 @@
 		<Card.Root>
 			<Card.Header>
 				<Card.Title>Other costs</Card.Title>
-				<Card.Description>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description>
+				<Card.Description
+					>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description
+				>
 			</Card.Header>
 			<Card.Content class="grid gap-3">
 				{#each data.costs as c (c.id)}
 					<div class="flex items-center justify-between gap-2 text-sm">
-						<span>{c.type === 'local_cartage' ? 'Local cartage' : 'Other'}{c.note ? ` · ${c.note}` : ''}</span>
+						<span
+							>{c.type === 'local_cartage' ? 'Local cartage' : 'Other'}{c.note
+								? ` · ${c.note}`
+								: ''}</span
+						>
 						<span class="flex items-center gap-1">
 							<Money paisa={c.amount} />
 							{#if !locked}
 								<form
-										method="POST"
-										action={formAction('removeCost')}
-										use:enhance={async (input) => {
-											const ok = await ask({ title: 'Remove this cost?', description: `${c.type === 'local_cartage' ? 'Local cartage' : 'Other'}${c.note ? ` · ${c.note}` : ''} · ${formatRs(c.amount)}`, confirmLabel: 'Remove', destructive: true });
-											if (!ok) return input.cancel();
-											return act('removeCost')();
-										}}
-									>
+									method="POST"
+									action={formAction('removeCost')}
+									use:enhance={async (input) => {
+										const ok = await ask({
+											title: 'Remove this cost?',
+											description: `${c.type === 'local_cartage' ? 'Local cartage' : 'Other'}${c.note ? ` · ${c.note}` : ''} · ${formatRs(c.amount)}`,
+											confirmLabel: 'Remove',
+											destructive: true
+										});
+										if (!ok) return input.cancel();
+										return act('removeCost')();
+									}}
+								>
 									<input type="hidden" name="costId" value={c.id} />
-									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"><Trash /></Button>
+									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"
+										><Trash /></Button
+									>
 								</form>
 							{/if}
 						</span>
@@ -420,12 +541,27 @@
 					<p class="text-sm text-muted-foreground">None.</p>
 				{/each}
 				{#if !locked}
-					<form method="POST" action={formAction('addCost')} use:enhance={act('cost')} class="flex flex-wrap items-end gap-2">
-						<select name="type" class="h-9 rounded-md border bg-background px-2 text-sm" aria-label="Type">
+					<form
+						method="POST"
+						action={formAction('addCost')}
+						use:enhance={act('cost')}
+						class="flex flex-wrap items-end gap-2"
+					>
+						<select
+							name="type"
+							class="h-9 rounded-md border bg-background px-2 text-sm"
+							aria-label="Type"
+						>
 							<option value="local_cartage">Local cartage</option>
 							<option value="other">Other</option>
 						</select>
-						<Input name="amount" inputmode="decimal" placeholder="Rs" class="w-28" aria-label="Amount" />
+						<Input
+							name="amount"
+							inputmode="decimal"
+							placeholder="Rs"
+							class="w-28"
+							aria-label="Amount"
+						/>
 						<Input name="note" placeholder="Note" class="w-40 flex-1" aria-label="Note" />
 						<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
 					</form>
@@ -461,7 +597,11 @@
 		use:enhance={act('items', () => (edits = {}))}
 		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
 	>
-		<input type="hidden" name="rows" value={JSON.stringify(Object.entries(edits).map(([id, x]) => ({ id, ...x })))} />
+		<input
+			type="hidden"
+			name="rows"
+			value={JSON.stringify(Object.entries(edits).map(([id, x]) => ({ id, ...x })))}
+		/>
 		<span class="text-sm text-muted-foreground">{dirty} unsaved line{dirty === 1 ? '' : 's'}</span>
 		<Button type="button" variant="ghost" onclick={() => (edits = {})}>Discard</Button>
 		<Button type="submit" disabled={!!busy}>{busy === 'items' ? 'Saving…' : 'Save items'}</Button>

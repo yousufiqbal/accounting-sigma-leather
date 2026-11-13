@@ -28,7 +28,8 @@ async function categories() {
 	}
 	const order = DEFAULT_CATEGORIES.map((c) => c.name);
 	return rows.sort((a, b) => {
-		const ia = order.indexOf(a.name), ib = order.indexOf(b.name);
+		const ia = order.indexOf(a.name),
+			ib = order.indexOf(b.name);
 		return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.name.localeCompare(b.name);
 	});
 }
@@ -36,7 +37,9 @@ async function categories() {
 const inMonth = (month: string) => and(gte(exp.date, `${month}-01`), lt(exp.date, `${month}-32`));
 
 async function isLocked(date: string) {
-	return !!(await db.query.monthLocks.findFirst({ where: eq(schema.monthLocks.month, date.slice(0, 7)) }));
+	return !!(await db.query.monthLocks.findFirst({
+		where: eq(schema.monthLocks.month, date.slice(0, 7))
+	}));
 }
 
 export const load: PageServerLoad = async ({ parent }) => {
@@ -48,7 +51,11 @@ export const load: PageServerLoad = async ({ parent }) => {
 		.where(inMonth(month))
 		.orderBy(desc(exp.date), desc(exp.createdAt));
 	const byCat = await db
-		.select({ categoryId: exp.categoryId, total: sql<number>`sum(${exp.amount})`, n: sql<number>`count(*)` })
+		.select({
+			categoryId: exp.categoryId,
+			total: sql<number>`sum(${exp.amount})`,
+			n: sql<number>`count(*)`
+		})
 		.from(exp)
 		.where(inMonth(month))
 		.groupBy(exp.categoryId);
@@ -115,7 +122,8 @@ export const actions: Actions = {
 		const f = await request.formData();
 		const p = await parse(f);
 		if (p.error || !p.values) return fail(400, { error: p.error });
-		if (await isLocked(p.values.date)) return fail(400, { error: 'That month is locked. Unlock it in Reports first.' });
+		if (await isLocked(p.values.date))
+			return fail(400, { error: 'That month is locked. Unlock it in Reports first.' });
 		const id = String(f.get('id') ?? '');
 		if (id) {
 			const old = await db.query.expenses.findFirst({ where: eq(exp.id, id) });
@@ -155,7 +163,10 @@ export const actions: Actions = {
 		const id = String((await request.formData()).get('id') ?? '');
 		const c = await db.query.expenseCategories.findFirst({ where: eq(cat.id, id) });
 		if (!c) return fail(404, { error: 'Category not found.' });
-		const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(exp).where(eq(exp.categoryId, id));
+		const [{ n }] = await db
+			.select({ n: sql<number>`count(*)` })
+			.from(exp)
+			.where(eq(exp.categoryId, id));
 		if (n > 0)
 			return fail(400, {
 				error: `“${c.name}” has ${n} expense${n === 1 ? '' : 's'} — delete or move them to another category first.`

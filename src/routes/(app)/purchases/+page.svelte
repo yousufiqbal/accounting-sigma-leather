@@ -24,7 +24,13 @@
 		landed: { tone: 'success', label: 'landed' }
 	} as const;
 	const fmtDate = (d: string | null) =>
-		d ? new Date(`${d}T12:00:00+05:00`).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+		d
+			? new Date(`${d}T12:00:00+05:00`).toLocaleDateString('en-GB', {
+					day: '2-digit',
+					month: 'short',
+					year: 'numeric'
+				})
+			: '—';
 </script>
 
 <div class="grid gap-6">
@@ -32,7 +38,8 @@
 		<div>
 			<h1 class="text-2xl font-semibold tracking-tight">Purchases</h1>
 			<p class="text-sm text-muted-foreground">
-				Stock bought from suppliers — China or local. Marking a purchase arrived adds the stock in Shopify and updates average cost.
+				Stock bought from suppliers — China or local. Marking a purchase arrived adds the stock in
+				Shopify and updates average cost.
 			</p>
 		</div>
 		<Button onclick={() => (open = true)}><Plus /> New purchase</Button>
@@ -66,17 +73,30 @@
 							</Table.Cell>
 							<Table.Cell>
 								<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
-								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge tone="warning" label="DDP pending" />{/if}
+								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge
+										tone="warning"
+										label="DDP pending"
+									/>{/if}
 								<div class="text-xs text-muted-foreground">
-									{b.status === 'landed' ? fmtDate(b.landedOn) : b.status === 'paid' ? fmtDate(b.paidOn) : ''}
+									{b.status === 'landed'
+										? fmtDate(b.landedOn)
+										: b.status === 'paid'
+											? fmtDate(b.paidOn)
+											: ''}
 								</div>
 							</Table.Cell>
 							<Table.Cell class="num text-right">{b.items}</Table.Cell>
 							<Table.Cell class="num text-right">{b.totals.units}</Table.Cell>
-							<Table.Cell class="num text-right">{(b.totals.weightG / 1000).toFixed(1)} kg</Table.Cell>
+							<Table.Cell class="num text-right"
+								>{(b.totals.weightG / 1000).toFixed(1)} kg</Table.Cell
+							>
 							<Table.Cell class="text-right"><Money paisa={b.totals.goods} /></Table.Cell>
-							<Table.Cell class="text-right"><Money paisa={b.totals.ddp + b.totals.extra} /></Table.Cell>
-							<Table.Cell class="pr-6 text-right font-medium"><Money paisa={b.totals.landed} /></Table.Cell>
+							<Table.Cell class="text-right"
+								><Money paisa={b.totals.ddp + b.totals.extra} /></Table.Cell
+							>
+							<Table.Cell class="pr-6 text-right font-medium"
+								><Money paisa={b.totals.landed} /></Table.Cell
+							>
 						</Table.Row>
 					{:else}
 						<Table.Row>
@@ -116,7 +136,13 @@
 								currency === val && 'border-primary bg-accent'
 							]}
 						>
-							<input type="radio" name="currency" value={val} bind:group={currency} class="sr-only" />{label}
+							<input
+								type="radio"
+								name="currency"
+								value={val}
+								bind:group={currency}
+								class="sr-only"
+							/>{label}
 						</label>
 					{/each}
 				</div>
@@ -124,7 +150,13 @@
 			{#if currency === 'RMB'}
 				<div class="grid gap-2">
 					<Label for="fx">Rs paid per 1 yuan</Label>
-					<Input id="fx" name="fx" inputmode="decimal" value={data.rates.rmbFx ? data.rates.rmbFx / 10_000 : ''} required />
+					<Input
+						id="fx"
+						name="fx"
+						inputmode="decimal"
+						value={data.rates.rmbFx ? data.rates.rmbFx / 10_000 : ''}
+						required
+					/>
 				</div>
 			{/if}
 			<div class="grid gap-2">
@@ -135,7 +167,9 @@
 					inputmode="decimal"
 					value={currency === 'RMB' && data.rates.ddpPerKg ? data.rates.ddpPerKg / 100 : '0'}
 				/>
-				{#if currency === 'PKR'}<p class="text-xs text-muted-foreground">Usually 0 for local suppliers.</p>{/if}
+				{#if currency === 'PKR'}<p class="text-xs text-muted-foreground">
+						Usually 0 for local suppliers.
+					</p>{/if}
 			</div>
 			<Button type="submit">Create</Button>
 		</form>

@@ -168,11 +168,11 @@
 						variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button
 					>
 				{/each}
-				<form method="GET" class="ml-auto" data-sveltekit-keepfocus>
+				<form method="GET" class="w-full sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
 					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
 						<input type="hidden" name={k} value={val} />
 					{/each}
-					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-44" />
+					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
 				</form>
 			</div>
 		</Card.Header>
