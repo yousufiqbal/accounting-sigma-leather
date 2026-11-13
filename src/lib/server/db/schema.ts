@@ -196,6 +196,17 @@ export const orders = sqliteTable(
 	]
 );
 
+/** What a Shopify bundle (requiresComponents variant) is made of. Its cost = Σ component cost × qty. */
+export const bundleComponents = sqliteTable(
+	'bundle_components',
+	{
+		bundleId: text('bundle_id').notNull(),
+		componentId: text('component_id').notNull(),
+		qty: integer('qty').notNull()
+	},
+	(t) => [primaryKey({ columns: [t.bundleId, t.componentId] })]
+);
+
 /** Shopify customers (only what's needed: name, phone, city). */
 export const customers = sqliteTable('customers', {
 	id: text('id').primaryKey(), // shopify customer id

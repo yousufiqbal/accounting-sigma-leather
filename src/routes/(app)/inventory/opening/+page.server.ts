@@ -39,7 +39,8 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const rates = await getRates();
 	// Active products not yet costed by a purchase (drafts/archived are leftovers).
-	const base = and(eq(v.status, 'ACTIVE'), ne(v.costSource, 'batch'));
+	// Bundles get their cost from their items — nothing to enter for them here.
+	const base = and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false), ne(v.costSource, 'batch'));
 	const where_ = (k: View) =>
 		and(base, k === 'highddp' ? highDdp(rates.rmbFx, rates.ddpPerKg) : VIEW_WHERE[k]);
 	const filters = [where_(view)];

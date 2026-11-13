@@ -222,13 +222,25 @@
 									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
 									<div class="min-w-0">
 										{#if groups[i].grouped}
-											<div class="truncate">{r.variantTitle ?? 'Default'}</div>
+											<div class="flex min-w-0 items-center gap-1.5">
+												<span class="truncate">{r.variantTitle ?? 'Default'}</span>
+												{#if r.isBundle}<StatusBadge
+														tone="info"
+														label="bundle · {r.bundleItems} items"
+													/>{/if}
+											</div>
 											{#if r.sku}<div class="truncate text-xs text-muted-foreground">
 													{r.sku}
 												</div>{/if}
 										{:else}
-											<div class="truncate font-medium" title={r.productTitle}>
-												{r.productTitle}
+											<div class="flex min-w-0 items-center gap-1.5">
+												<span class="truncate font-medium" title={r.productTitle}
+													>{r.productTitle}</span
+												>
+												{#if r.isBundle}<StatusBadge
+														tone="info"
+														label="bundle · {r.bundleItems} items"
+													/>{/if}
 											</div>
 											<div class="truncate text-xs text-muted-foreground">
 												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
@@ -294,10 +306,17 @@
 										class="h-8 w-24 text-right"
 										aria-label="New price for {r.productTitle} {r.variantTitle ?? ''}"
 									/>
-									{#if npProfit !== null && np}
-										<span class={['num text-xs whitespace-nowrap', tone(npProfit / np)]}
-											>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
-										>
+									{#if np !== null && np !== r.price}
+										<div class="grid text-xs leading-tight whitespace-nowrap">
+											<span class={np < r.price ? 'font-medium text-danger' : 'text-success'}
+												>{np < r.price ? '↓' : '↑'}
+												{formatRs(Math.abs(np - r.price))}
+												{np < r.price ? 'lower' : 'higher'}</span
+											>
+											{#if npProfit !== null}<span class={['num', tone(npProfit / np)]}
+													>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
+												>{/if}
+										</div>
 									{/if}
 								</div>
 							</Table.Cell>
@@ -340,17 +359,26 @@
 				Live store prices change immediately. Compare-at prices are not touched.
 			</Sheet.Description>
 		</Sheet.Header>
-		<div class="grid max-h-[60vh] gap-2 overflow-auto px-4 text-sm">
+		{@const lower = changes.filter((c) => c.price < c.r.price).length}
+		{#if lower}
+			<p class="mx-4 rounded-md bg-danger-soft px-3 py-2 text-sm text-danger">
+				{lower} of {changes.length} change{changes.length === 1 ? '' : 's'}
+				{lower === 1 ? 'is a price decrease' : 'are price decreases'} (↓).
+			</p>
+		{/if}
+		<div class="grid max-h-[60vh] grid-cols-1 gap-2 overflow-y-auto px-4 text-sm">
 			{#each changes as c (c.r.id)}
 				{@const after = c.r.cost > 0 ? profitAt(c.price, c.r.cost, c.r.perUnit) : null}
-				<div class="flex items-center justify-between gap-3 border-b py-2">
-					<div class="min-w-0">
+				<div class="flex min-w-0 items-center justify-between gap-3 border-b py-2">
+					<div class="min-w-0 flex-1">
 						<div class="truncate font-medium">{c.r.productTitle}</div>
 						<div class="truncate text-xs text-muted-foreground">{c.r.variantTitle ?? ''}</div>
 					</div>
 					<div class="text-right whitespace-nowrap">
 						<span class="text-muted-foreground line-through">{formatRs(c.r.price)}</span>
-						<span class="ml-1 font-medium">{formatRs(c.price)}</span>
+						<span class={['ml-1 font-medium', c.price < c.r.price ? 'text-danger' : 'text-success']}
+							>{c.price < c.r.price ? '↓' : '↑'} {formatRs(c.price)}</span
+						>
 						{#if after !== null}<div class={['text-xs', tone(after / c.price)]}>
 								profit {formatRs(after)} / pc
 							</div>{/if}

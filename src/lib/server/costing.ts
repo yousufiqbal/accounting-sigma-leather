@@ -74,7 +74,8 @@ export function baseCost(
 ): { cost: number; source: 'estimated' | 'shopify' | 'none'; est: number | null } {
 	const est = estimate(row, r);
 	if (est !== null) return { cost: est, source: 'estimated', est };
-	if (row.shopifyCostOk && row.shopifyCost) return { cost: row.shopifyCost, source: 'shopify', est };
+	if (row.shopifyCostOk && row.shopifyCost)
+		return { cost: row.shopifyCost, source: 'shopify', est };
 	return { cost: 0, source: 'none', est };
 }
 
@@ -98,7 +99,8 @@ export async function recomputeCosts(ids?: string[]) {
 			costSource: v.costSource
 		})
 		.from(v)
-		.where(ids ? inArray(v.id, ids) : undefined);
+		// Bundles take their cost from their items (updateBundleCosts), not from own inputs.
+		.where(and(eq(v.isBundle, false), ids ? inArray(v.id, ids) : undefined));
 
 	const now = new Date().toISOString();
 	const stmts = [];
@@ -111,7 +113,10 @@ export async function recomputeCosts(ids?: string[]) {
 		if (row.estCost === b.est && row.avgCost === avgCost && row.costSource === costSource) continue;
 		changed++;
 		stmts.push(
-			db.update(v).set({ estCost: b.est, avgCost, costSource, updatedAt: now }).where(eq(v.id, row.id))
+			db
+				.update(v)
+				.set({ estCost: b.est, avgCost, costSource, updatedAt: now })
+				.where(eq(v.id, row.id))
 		);
 		if (!isBatch && row.avgCost !== avgCost) {
 			stmts.push(
@@ -129,14 +134,39 @@ export async function recomputeCosts(ids?: string[]) {
 			db
 				.update(schema.orderLines)
 				.set({ costSnapshot: b.cost || null })
-				.where(and(eq(schema.orderLines.variantId, row.id), eq(schema.orderLines.costEstimated, true)))
+				.where(
+					and(eq(schema.orderLines.variantId, row.id), eq(schema.orderLines.costEstimated, true))
+				)
 		);
 	}
 	for (let i = 0; i < stmts.length; i += 100) {
 		const chunk = stmts.slice(i, i + 100);
 		await db.batch(chunk as [(typeof chunk)[0], ...typeof chunk]);
 	}
+	await updateBundleCosts();
 	return { changed };
+}
+
+/**
+ * Bundle cost = Σ item cost × qty (from Shopify's bundle contents). If any item has no cost the
+ * bundle shows no cost (0) rather than a misleadingly low one. All items from purchases → 'batch'.
+ */
+export async function updateBundleCosts() {
+	await db.run(sql`
+		with t as (
+			select bc.bundle_id as id,
+				sum(bc.qty * coalesce(c.avg_cost_paisa, 0)) as total,
+				sum(case when coalesce(c.avg_cost_paisa, 0) = 0 then 1 else 0 end) as missing,
+				sum(case when c.cost_source != 'batch' then 1 else 0 end) as estimated
+			from bundle_components bc left join variants c on c.id = bc.component_id
+			group by bc.bundle_id
+		)
+		update variants set
+			avg_cost_paisa = case when t.missing > 0 then 0 else t.total end,
+			est_cost_paisa = case when t.missing > 0 then null else t.total end,
+			cost_source = case when t.missing > 0 then 'none' when t.estimated > 0 then 'estimated' else 'batch' end
+		from t
+		where variants.id = t.id and variants.is_bundle = 1`);
 }
 
 /** Save buying prices / currency / "Shopify cost is correct" for many variants at once. */
@@ -182,7 +212,7 @@ export async function stockSummary() {
 			noWeight: sql<number>`coalesce(sum(case when ${v.status} = 'ACTIVE' and coalesce(${v.weightG}, 0) = 0 then 1 else 0 end), 0)`
 		})
 		.from(v)
-		.where(eq(v.status, 'ACTIVE')); // draft/archived = leftovers, not valued
+		.where(and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false))); // draft/archived = leftovers; bundles hold no stock
 	return s;
 }
 
@@ -196,7 +226,12 @@ export async function pushWeights(items: { id: string; weightG: number }[]) {
 	const rows = await db
 		.select({ id: v.id, inv: v.inventoryItemId })
 		.from(v)
-		.where(inArray(v.id, items.map((i) => i.id)));
+		.where(
+			inArray(
+				v.id,
+				items.map((i) => i.id)
+			)
+		);
 	const invOf = new Map(rows.map((r) => [r.id, r.inv]));
 	const ok: { id: string; weightG: number }[] = [];
 	let failed = 0;
@@ -210,9 +245,9 @@ export async function pushWeights(items: { id: string; weightG: number }[]) {
 					`m${j}: inventoryItemUpdate(id: "gid://shopify/InventoryItem/${invOf.get(c.id)}", input: { measurement: { weight: { unit: GRAMS, value: ${Math.max(0, Math.round(c.weightG))} } } }) { userErrors { message } }`
 			)
 			.join('\n');
-		const d = await shopifyGql<Record<string, { userErrors: { message: string }[] }>>(`mutation { ${body} }`).catch(
-			() => null
-		);
+		const d = await shopifyGql<Record<string, { userErrors: { message: string }[] }>>(
+			`mutation { ${body} }`
+		).catch(() => null);
 		chunk.forEach((c, j) => {
 			if (d && !d[`m${j}`]?.userErrors.length) ok.push(c);
 			else failed++;
@@ -220,9 +255,12 @@ export async function pushWeights(items: { id: string; weightG: number }[]) {
 	}
 	const now = new Date().toISOString();
 	for (let i = 0; i < ok.length; i += 100) {
-		const stmts = ok
-			.slice(i, i + 100)
-			.map((c) => db.update(v).set({ weightG: Math.round(c.weightG), updatedAt: now }).where(eq(v.id, c.id)));
+		const stmts = ok.slice(i, i + 100).map((c) =>
+			db
+				.update(v)
+				.set({ weightG: Math.round(c.weightG), updatedAt: now })
+				.where(eq(v.id, c.id))
+		);
 		await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
 	}
 	if (ok.length) await recomputeCosts(ok.map((c) => c.id));

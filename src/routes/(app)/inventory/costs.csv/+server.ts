@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import type { RequestHandler } from './$types';
 
@@ -14,7 +14,7 @@ export const GET: RequestHandler = async () => {
 	const rows = await db
 		.select()
 		.from(v)
-		.where(eq(v.status, 'ACTIVE'))
+		.where(and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false)))
 		.orderBy(
 			desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`),
 			asc(v.productTitle),

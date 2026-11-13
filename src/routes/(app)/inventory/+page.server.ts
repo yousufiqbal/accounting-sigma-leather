@@ -18,7 +18,7 @@ const v = schema.variants;
 
 const VIEW_WHERE: Record<View, SQL | undefined> = {
 	needs: and(gt(v.shopifyOnHand, 0), eq(v.avgCost, 0)),
-	noweight: and(eq(v.status, 'ACTIVE'), sql`coalesce(${v.weightG}, 0) = 0`),
+	noweight: and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false), sql`coalesce(${v.weightG}, 0) = 0`),
 	estimated: or(eq(v.costSource, 'estimated'), eq(v.costSource, 'shopify')),
 	all: undefined
 };
@@ -32,7 +32,7 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	const rates = await getRates();
 	// Draft/archived products are leftovers (owner): never shown or valued.
-	const active = eq(v.status, 'ACTIVE');
+	const active = and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false))!; // bundles hold no stock of their own
 	const where_ = (k: View) => and(active, VIEW_WHERE[k]);
 	const filters = [where_(view)];
 	if (q) filters.push(or(like(v.productTitle, `%${q}%`), like(v.sku, `%${q}%`)));

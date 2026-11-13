@@ -36,6 +36,9 @@ export const load: PageServerLoad = async ({ url }) => {
 			id: v.id,
 			productId: v.productId,
 			productTitle: v.productTitle,
+			isBundle: v.isBundle,
+			/** Bundles: how many different items are inside. */
+			bundleItems: sql<number>`(select count(*) from bundle_components bc where bc.bundle_id = ${v.id})`,
 			imageUrl: v.imageUrl,
 			variantTitle: v.variantTitle,
 			sku: v.sku,

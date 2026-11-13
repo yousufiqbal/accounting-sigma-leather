@@ -85,6 +85,7 @@ export function syncVariants(stockAnchor?: string) {
 			).map((r) => [r.id, r.onHand])
 		);
 		const afterOnHand = new Map<string, number>();
+		const bundleIds: string[] = [];
 		do {
 			const d: {
 				productVariants: {
@@ -116,6 +117,7 @@ export function syncVariants(stockAnchor?: string) {
 					0
 				);
 				afterOnHand.set(gidId(v.id), onHand);
+				if (v.requiresComponents) bundleIds.push(v.id);
 				const values = {
 					id: gidId(v.id),
 					productId: gidId(v.product.id),
@@ -146,10 +148,54 @@ export function syncVariants(stockAnchor?: string) {
 			count += batch.length;
 			after = d.productVariants.pageInfo.hasNextPage ? d.productVariants.pageInfo.endCursor : null;
 		} while (after);
-		await recomputeCosts(); // weights / Shopify costs may have changed
+		await syncBundleComponents(bundleIds);
+		await recomputeCosts(); // weights / Shopify costs may have changed (also bundle costs)
 		const stock = await recordStockChanges(before, afterOnHand, stockAnchor ?? now);
 		return { variants: count, stockChanges: stock.changes };
 	});
+}
+
+/** What each bundle is made of (Shopify bundles: requiresComponents). Replaces the stored list. */
+async function syncBundleComponents(gids: string[]) {
+	for (let i = 0; i < gids.length; i += 10) {
+		const chunk = gids.slice(i, i + 10);
+		const q = chunk
+			.map(
+				(id, k) =>
+					`b${k}: productVariant(id: "${id}") { id productVariantComponents(first: 50) { nodes { quantity productVariant { id } } } }`
+			)
+			.join(' ');
+		const d = await shopifyGql<
+			Record<
+				string,
+				{
+					id: string;
+					productVariantComponents: {
+						nodes: { quantity: number; productVariant: { id: string } }[];
+					};
+				} | null
+			>
+		>(`{ ${q} }`);
+		const stmts = [];
+		for (const v of Object.values(d)) {
+			if (!v) continue;
+			const bundleId = gidId(v.id);
+			stmts.push(
+				db.delete(schema.bundleComponents).where(eq(schema.bundleComponents.bundleId, bundleId))
+			);
+			for (const c of v.productVariantComponents.nodes)
+				stmts.push(
+					db
+						.insert(schema.bundleComponents)
+						.values({ bundleId, componentId: gidId(c.productVariant.id), qty: c.quantity })
+						.onConflictDoUpdate({
+							target: [schema.bundleComponents.bundleId, schema.bundleComponents.componentId],
+							set: { qty: c.quantity }
+						})
+				);
+		}
+		if (stmts.length) await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
+	}
 }
 
 /** Orders first (so fulfilments explain stock drops), then variants + stock check. */
