@@ -429,181 +429,210 @@
 	</Sheet.Content>
 </Sheet.Root>
 
-<Dialog.Root bind:open={costsOpen}>
-	<Dialog.Content class="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
-		<Dialog.Header class="flex flex-row flex-wrap items-center justify-between gap-2 pr-8">
-			<div>
-				<Dialog.Title>Cost of selling</Dialog.Title>
-				<Dialog.Description>
-					{#if fixedMode}
-						Fixed: your own numbers, used until you change them.
-					{:else}
-						Adjusting: measured from {m.orders} delivered orders in the last {data.windowDays} days.
-					{/if}
-					Ads and fixed costs are left out.
-				</Dialog.Description>
-			</div>
-			<Button variant="ghost" size="sm" onclick={() => (showCosts = !showCosts)}
-				>{showCosts ? 'Hide' : 'Edit numbers'}</Button
-			>
+<Dialog.Root
+	bind:open={costsOpen}
+	onOpenChange={(v) => {
+		if (!v) showCosts = false;
+	}}
+>
+	<Dialog.Content class="max-h-[90svh] overflow-y-auto sm:max-w-lg">
+		<Dialog.Header>
+			<Dialog.Title>Cost of selling</Dialog.Title>
+			<Dialog.Description>
+				What each sale costs besides the product itself. Ads, salaries and rent are not included —
+				the target margin covers them.
+			</Dialog.Description>
 		</Dialog.Header>
-		<div class="grid gap-4">
+
+		<!-- Mode -->
+		<div class="grid grid-cols-2 gap-2">
+			{#each [{ id: 'adjusting', title: 'Adjusting', sub: `Follows the last ${data.windowDays} days` }, { id: 'fixed', title: 'Fixed', sub: 'Your own numbers' }] as opt (opt.id)}
+				{@const active = (data.settings.mode ?? 'adjusting') === opt.id}
+				<form method="POST" action={formAction('mode')} use:enhance>
+					<input type="hidden" name="mode" value={opt.id} />
+					<button
+						type="submit"
+						class={[
+							'w-full rounded-lg border px-3 py-2 text-left transition-colors',
+							active ? 'border-primary bg-accent' : 'hover:bg-muted'
+						]}
+						aria-pressed={active}
+					>
+						<span class="block text-sm font-medium">{opt.title}</span>
+						<span class="block text-xs text-muted-foreground">{opt.sub}</span>
+					</button>
+				</form>
+			{/each}
+		</div>
+
+		<form
+			method="POST"
+			action={formAction('settings')}
+			class="grid gap-4"
+			use:enhance={() => {
+				busy = 'settings';
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					busy = null;
+					if (result.type === 'success') showCosts = false;
+				};
+			}}
+		>
+			{#snippet row(
+				label: string,
+				name: string,
+				shown: string,
+				value: string,
+				hint: string,
+				unit: 'rs' | 'pct' | 'n',
+				tone = ''
+			)}
+				<div class="flex items-center justify-between gap-3 py-1.5">
+					<span class="text-sm text-muted-foreground">{label}</span>
+					{#if showCosts}
+						<div class="flex items-center gap-1.5">
+							<span class="w-5 text-right text-xs text-muted-foreground"
+								>{unit === 'rs' ? 'Rs' : ''}</span
+							>
+							<Input
+								id={name}
+								{name}
+								{value}
+								placeholder={hint}
+								inputmode="decimal"
+								class="h-8 w-24 text-right"
+							/>
+							<span class="w-3 text-xs text-muted-foreground">{unit === 'pct' ? '%' : ''}</span>
+						</div>
+					{:else}
+						<span class={['num text-sm font-medium', tone]}>{shown}</span>
+					{/if}
+				</div>
+			{/snippet}
+
+			<div class="rounded-lg border px-4 py-2">
+				{@render row(
+					'Target margin',
+					'targetMargin',
+					formatPct(e.target, 0),
+					pct(data.settings.targetMargin),
+					'',
+					'pct'
+				)}
+			</div>
+
+			<div class="grid gap-1">
+				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Per order</p>
+				<div class="divide-y rounded-lg border px-4 py-1">
+					{@render row(
+						'Courier + returns',
+						'courierPerOrder',
+						formatRs(e.courierPerOrder),
+						o.courierPerOrder !== undefined ? rs(o.courierPerOrder) : '',
+						rs(m.courierPerOrder),
+						'rs'
+					)}
+					{@render row(
+						'Packaging',
+						'packagingPerOrder',
+						formatRs(e.packagingPerOrder),
+						o.packagingPerOrder !== undefined ? rs(o.packagingPerOrder) : '',
+						rs(m.packagingPerOrder),
+						'rs'
+					)}
+					{@render row(
+						'Shipping the customer pays',
+						'shippingPerOrder',
+						`−${formatRs(e.shippingPerOrder)}`,
+						o.shippingPerOrder !== undefined ? rs(o.shippingPerOrder) : '',
+						rs(m.shippingPerOrder),
+						'rs',
+						'text-success'
+					)}
+					<div class="flex items-center justify-between py-1.5 font-medium">
+						<span class="text-sm">Net per order</span>
+						<span class="num text-sm">{formatRs(e.perOrder)}</span>
+					</div>
+				</div>
+			</div>
+
+			<div class="grid gap-1">
+				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">% of price</p>
+				<div class="divide-y rounded-lg border px-4 py-1">
+					{@render row(
+						'Tax withheld by courier',
+						'withholdingPct',
+						formatPct(e.withholdingPct),
+						o.withholdingPct !== undefined ? pct(o.withholdingPct) : '',
+						pct(m.withholdingPct),
+						'pct'
+					)}
+					{@render row(
+						'5% advance discount',
+						'advancePct',
+						formatPct(e.advancePct),
+						o.advancePct !== undefined ? pct(o.advancePct) : '',
+						pct(m.advancePct),
+						'pct'
+					)}
+					{@render row(
+						'Other discounts',
+						'otherDiscountPct',
+						formatPct(e.otherDiscountPct),
+						o.otherDiscountPct !== undefined ? pct(o.otherDiscountPct) : '',
+						pct(m.otherDiscountPct),
+						'pct'
+					)}
+					<div class="flex items-center justify-between py-1.5 font-medium">
+						<span class="text-sm">Total</span>
+						<span class="num text-sm">{formatPct(e.pct)}</span>
+					</div>
+				</div>
+			</div>
+
+			<div class="rounded-lg bg-muted/60 px-4 py-3">
+				{@render row(
+					'Pieces in a typical order',
+					'unitsPerOrder',
+					e.unitsPerOrder.toFixed(1),
+					o.unitsPerOrder !== undefined ? String(o.unitsPerOrder) : '',
+					m.unitsPerOrder.toFixed(1),
+					'n'
+				)}
+				<div class="flex items-center justify-between gap-3 pt-1">
+					<span class="text-sm font-medium">Selling cost per piece</span>
+					<span class="num font-semibold">{formatRs(e.perUnit)} + {formatPct(e.pct)} of price</span>
+				</div>
+				<p class="mt-1 text-xs text-muted-foreground">
+					Products usually bought in bulk carry less per piece — each uses how many pieces its own
+					orders have.
+				</p>
+			</div>
+
 			<div class="flex flex-wrap items-center gap-2">
-				{#each [['adjusting', 'Adjusting — follows last 90 days'], ['fixed', 'Fixed — my numbers']] as [id, label] (id)}
-					<form method="POST" action={formAction('mode')} use:enhance>
-						<input type="hidden" name="mode" value={id} />
-						<Button
-							type="submit"
-							size="sm"
-							variant={(data.settings.mode ?? 'adjusting') === id ? 'secondary' : 'ghost'}
-							>{label}</Button
-						>
-					</form>
-				{/each}
-				{#if fixedMode}
-					<form method="POST" action={formAction('mode')} use:enhance class="ml-auto">
-						<input type="hidden" name="mode" value="fixed" />
-						<input type="hidden" name="reset" value="1" />
-						<Button type="submit" size="sm" variant="outline">Copy today's measured numbers</Button>
-					</form>
+				{#if showCosts}
+					<Button type="submit" disabled={!!busy}>{busy === 'settings' ? 'Saving…' : 'Save'}</Button
+					>
+					<Button type="button" variant="ghost" onclick={() => (showCosts = false)}>Cancel</Button>
+					<span class="text-xs text-muted-foreground">
+						{fixedMode ? 'Hint = last 90 days.' : 'Empty box = measured value (hint).'}
+					</span>
+				{:else}
+					<Button type="button" variant="outline" onclick={() => (showCosts = true)}
+						>Edit numbers</Button
+					>
 				{/if}
 			</div>
-			<p class="text-xs text-muted-foreground">
-				Each product's share of the shipping cost uses how many pieces its orders usually have, in
-				both modes.
-			</p>
-			<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
-				<div>
-					<span class="text-muted-foreground">Courier + returns / order</span>
-					<div class="num font-medium">{formatRs(e.courierPerOrder)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Packaging / order</span>
-					<div class="num font-medium">{formatRs(e.packagingPerOrder)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Shipping charged / order</span>
-					<div class="num font-medium text-success">−{formatRs(e.shippingPerOrder)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Pieces per order (typical)</span>
-					<div class="num font-medium">{e.unitsPerOrder.toFixed(1)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Withholding (4% of COD)</span>
-					<div class="num font-medium">{formatPct(e.withholdingPct)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">5% advance discount</span>
-					<div class="num font-medium">{formatPct(e.advancePct)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Other discounts</span>
-					<div class="num font-medium">{formatPct(e.otherDiscountPct)}</div>
-				</div>
-				<div>
-					<span class="text-muted-foreground">Per piece</span>
-					<div class="num font-medium">{formatRs(e.perUnit)} + {formatPct(e.pct)} of price</div>
-				</div>
-			</div>
-			{#if showCosts}
-				<form
-					method="POST"
-					action={formAction('settings')}
-					class="mt-4 grid gap-3 border-t pt-4"
-					use:enhance={() => {
-						busy = 'settings';
-						return async ({ update }) => {
-							await update({ reset: false });
-							busy = null;
-						};
-					}}
+		</form>
+
+		{#if fixedMode && !showCosts}
+			<form method="POST" action={formAction('mode')} use:enhance class="-mt-2">
+				<input type="hidden" name="mode" value="fixed" />
+				<input type="hidden" name="reset" value="1" />
+				<Button type="submit" size="sm" variant="link" class="px-0"
+					>Replace my numbers with the last 90 days</Button
 				>
-					<p class="text-xs text-muted-foreground">
-						{fixedMode
-							? 'Your fixed numbers. Faded hint = what the last 90 days measured.'
-							: 'Leave a box empty to use the measured value (shown faded).'}
-					</p>
-					<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-						<div class="grid gap-1.5">
-							<Label for="targetMargin">Target margin %</Label><Input
-								id="targetMargin"
-								name="targetMargin"
-								inputmode="decimal"
-								value={pct(data.settings.targetMargin)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="courierPerOrder">Courier + returns Rs</Label><Input
-								id="courierPerOrder"
-								name="courierPerOrder"
-								inputmode="decimal"
-								value={o.courierPerOrder !== undefined ? rs(o.courierPerOrder) : ''}
-								placeholder={rs(m.courierPerOrder)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="packagingPerOrder">Packaging Rs</Label><Input
-								id="packagingPerOrder"
-								name="packagingPerOrder"
-								inputmode="decimal"
-								value={o.packagingPerOrder !== undefined ? rs(o.packagingPerOrder) : ''}
-								placeholder={rs(m.packagingPerOrder)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="shippingPerOrder">Shipping charged Rs</Label><Input
-								id="shippingPerOrder"
-								name="shippingPerOrder"
-								inputmode="decimal"
-								value={o.shippingPerOrder !== undefined ? rs(o.shippingPerOrder) : ''}
-								placeholder={rs(m.shippingPerOrder)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="unitsPerOrder">Pieces per order</Label><Input
-								id="unitsPerOrder"
-								name="unitsPerOrder"
-								inputmode="decimal"
-								value={o.unitsPerOrder ?? ''}
-								placeholder={m.unitsPerOrder.toFixed(1)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="withholdingPct">Withholding %</Label><Input
-								id="withholdingPct"
-								name="withholdingPct"
-								inputmode="decimal"
-								value={o.withholdingPct !== undefined ? pct(o.withholdingPct) : ''}
-								placeholder={pct(m.withholdingPct)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="advancePct">Advance discount %</Label><Input
-								id="advancePct"
-								name="advancePct"
-								inputmode="decimal"
-								value={o.advancePct !== undefined ? pct(o.advancePct) : ''}
-								placeholder={pct(m.advancePct)}
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="otherDiscountPct">Other discounts %</Label><Input
-								id="otherDiscountPct"
-								name="otherDiscountPct"
-								inputmode="decimal"
-								value={o.otherDiscountPct !== undefined ? pct(o.otherDiscountPct) : ''}
-								placeholder={pct(m.otherDiscountPct)}
-							/>
-						</div>
-					</div>
-					<div>
-						<Button type="submit" disabled={!!busy}
-							>{busy === 'settings' ? 'Saving…' : 'Save'}</Button
-						>
-					</div>
-				</form>
-			{/if}
-		</div>
+			</form>
+		{/if}
 	</Dialog.Content>
 </Dialog.Root>
