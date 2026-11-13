@@ -306,7 +306,7 @@
 				Unpaid in Shopify, but the courier collected less — check if money came another way (bank
 				transfer) or it was sent free:
 				{#each p.shortCollected as o, i (o.name)}{i ? ', ' : ' '}<a
-						href="/orders?view=all&q={o.name}"
+						href="/orders/{o.name}"
 						class="underline">#{o.name}</a
 					>
 					(due {formatRs(o.outstanding)}, collected {formatRs(o.cod)}){/each}. These are counted as
