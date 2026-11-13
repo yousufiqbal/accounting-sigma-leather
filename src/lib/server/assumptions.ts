@@ -7,6 +7,8 @@
  * Labels: prepaid → "prepaid (TCS/other)", COD before LEOPARDS_UNTIL → "Leopards",
  *   otherwise "pickup / TCS (no tracking)". Known self-pickups get no fee.
  * Courier fee unknown → median PostEx delivery fee (incl. tax), flagged as estimated.
+ *   Exception: prepaid orders shipped WITHOUT tracking → no fee (the customer paid the
+ *   courier themselves).
  * One assumed parcel per order (tracking "A-<order>"). When real courier data later links
  * to the order, the assumed parcel is retired (status cancelled) so nothing counts twice.
  */
@@ -36,7 +38,11 @@ function candidatesWhere() {
 }
 
 type Kind = 'prepaid' | 'leopards' | 'direct';
-function classify(r: { financialStatus: string | null; isPrepaid: boolean; createdAt: string }): Kind {
+function classify(r: {
+	financialStatus: string | null;
+	isPrepaid: boolean;
+	createdAt: string;
+}): Kind {
 	if (r.isPrepaid || PAID.includes(r.financialStatus ?? '')) return 'prepaid';
 	if (new Date(r.createdAt) < new Date(LEOPARDS_UNTIL)) return 'leopards';
 	return 'direct';
@@ -71,6 +77,7 @@ async function createAssumed() {
 			name: o.name,
 			createdAt: o.createdAt,
 			fulfilledAt: o.fulfilledAt,
+			fulfillmentTracking: o.fulfillmentTracking,
 			financialStatus: o.financialStatus,
 			isPrepaid: o.isPrepaid,
 			total: o.total,
@@ -88,14 +95,19 @@ async function createAssumed() {
 		// Prepaid: only the unpaid remainder (if any) is collected on delivery.
 		const cash = kind === 'prepaid' ? Math.max(0, r.outstanding) : r.outstanding || r.total;
 		const pickup = PICKUP_ORDERS.includes(r.name);
-		const parcelFee = pickup ? 0 : fee;
+		// Prepaid + no tracking: the customer paid the courier themselves.
+		const customerPaid = kind === 'prepaid' && !r.fulfillmentTracking;
+		const noFee = pickup || customerPaid;
+		const parcelFee = noFee ? 0 : fee;
 		const label = pickup
 			? 'Self pickup at shop'
-			: kind === 'prepaid'
-				? 'Assumed: prepaid (TCS/other)'
-				: kind === 'leopards'
-					? 'Assumed: Leopards'
-					: 'Assumed: pickup / TCS (no tracking)';
+			: customerPaid
+				? 'Assumed: prepaid, customer paid delivery'
+				: kind === 'prepaid'
+					? 'Assumed: prepaid (TCS/other)'
+					: kind === 'leopards'
+						? 'Assumed: Leopards'
+						: 'Assumed: pickup / TCS (no tracking)';
 		const values = {
 			status: 'delivered' as const,
 			courierStatus: label,
@@ -103,7 +115,7 @@ async function createAssumed() {
 			cod: cash,
 			fee: parcelFee,
 			netPayable: cash - parcelFee,
-			feesEstimated: !pickup,
+			feesEstimated: !noFee,
 			settledAt: r.fulfilledAt,
 			updatedAt: now
 		};
