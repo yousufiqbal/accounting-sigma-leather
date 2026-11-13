@@ -27,11 +27,37 @@ export type SellingCosts = {
 	shippingPerOrder: number; // paisa charged to customers (offsets courier)
 };
 
+export type CostInputs = Omit<SellingCosts, 'orders'>;
+
 export type PricingSettings = {
 	targetMargin: number; // fraction, e.g. 0.3
-	/** Owner overrides of computed costs (same keys as SellingCosts). */
-	overrides: Partial<Omit<SellingCosts, 'orders'>>;
+	/**
+	 * adjusting — selling costs follow the last WINDOW_DAYS (plus any overrides below).
+	 * fixed     — the owner's own numbers (`fixed`), unchanged until edited.
+	 * Either way each product's pieces-per-order share is measured (it's how the product sells).
+	 */
+	mode?: 'adjusting' | 'fixed';
+	/** Adjusting mode: owner overrides of single measured values. */
+	overrides: Partial<CostInputs>;
+	/** Fixed mode: every value set by the owner. */
+	fixed?: CostInputs;
 };
+
+const COST_KEYS = [
+	'unitsPerOrder',
+	'withholdingPct',
+	'advancePct',
+	'otherDiscountPct',
+	'courierPerOrder',
+	'packagingPerOrder',
+	'shippingPerOrder'
+] as const;
+
+/** The selling-cost numbers currently in use, as a plain set (for freezing into fixed mode). */
+export function currentInputs(m: SellingCosts, s: PricingSettings): CostInputs {
+	const e = effective(m, s);
+	return Object.fromEntries(COST_KEYS.map((k) => [k, e[k]])) as CostInputs;
+}
 
 export async function getPricingSettings(): Promise<PricingSettings> {
 	return (await getSetting<PricingSettings>('pricing')) ?? { targetMargin: 0.3, overrides: {} };
@@ -112,11 +138,11 @@ export async function measuredCosts(): Promise<SellingCosts> {
 
 /** Measured costs with owner overrides applied, plus the two numbers the formula needs. */
 export function effective(m: SellingCosts, s: PricingSettings) {
-	const c = { ...m, ...s.overrides };
+	const c = s.mode === 'fixed' && s.fixed ? { ...m, ...s.fixed } : { ...m, ...s.overrides };
 	const pct = c.withholdingPct + c.advancePct + c.otherDiscountPct;
 	const perOrder = c.courierPerOrder + c.packagingPerOrder - c.shippingPerOrder;
 	const perUnit = Math.round(perOrder / Math.max(1, c.unitsPerOrder));
-	return { ...c, pct, perOrder, perUnit, target: s.targetMargin };
+	return { ...c, pct, perOrder, perUnit, target: s.targetMargin, mode: s.mode ?? 'adjusting' };
 }
 export type Effective = ReturnType<typeof effective>;
 

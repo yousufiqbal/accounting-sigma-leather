@@ -4,6 +4,7 @@ import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import {
 	effective,
+	currentInputs,
 	getPricingSettings,
 	measuredCosts,
 	productPerUnit,
@@ -159,11 +160,47 @@ const rsField = (f: FormData, k: string) => {
 };
 
 export const actions: Actions = {
+	/** Switch between adjusting (last 90 days) and fixed (own numbers) selling costs. */
+	mode: async ({ request }) => {
+		const f = await request.formData();
+		const mode = f.get('mode') === 'fixed' ? 'fixed' : 'adjusting';
+		const [measured, settings] = await Promise.all([measuredCosts(), getPricingSettings()]);
+		// First switch to fixed (or "copy measured"): freeze today's measured numbers.
+		const fresh = currentInputs(measured, { ...settings, mode: 'adjusting' });
+		const fixed = f.get('reset') ? fresh : (settings.fixed ?? fresh);
+		await setPricingSettings({ ...settings, mode, fixed });
+		return {
+			saved:
+				mode === 'fixed'
+					? 'Fixed mode: suggestions use your numbers until you change them.'
+					: 'Adjusting mode: suggestions follow the last 90 days.'
+		};
+	},
+
 	settings: async ({ request }) => {
 		const f = await request.formData();
 		try {
 			const target = pctField(f, 'targetMargin');
 			if (target === undefined) return fail(400, { error: 'Enter a target margin.' });
+			const current = await getPricingSettings();
+			if (current.mode === 'fixed') {
+				// Fixed: every box is a value; an empty box keeps the previous number.
+				const prev = current.fixed ?? currentInputs(await measuredCosts(), current);
+				const u = String(f.get('unitsPerOrder') ?? '').trim();
+				const units = u ? Number(u) : prev.unitsPerOrder;
+				if (!(units >= 1)) throw new Error('units');
+				const fixed = {
+					unitsPerOrder: units,
+					withholdingPct: pctField(f, 'withholdingPct') ?? prev.withholdingPct,
+					advancePct: pctField(f, 'advancePct') ?? prev.advancePct,
+					otherDiscountPct: pctField(f, 'otherDiscountPct') ?? prev.otherDiscountPct,
+					courierPerOrder: rsField(f, 'courierPerOrder') ?? prev.courierPerOrder,
+					packagingPerOrder: rsField(f, 'packagingPerOrder') ?? prev.packagingPerOrder,
+					shippingPerOrder: rsField(f, 'shippingPerOrder') ?? prev.shippingPerOrder
+				};
+				await setPricingSettings({ ...current, targetMargin: target, fixed });
+				return { saved: 'Fixed numbers saved.' };
+			}
 			const overrides: PricingSettings['overrides'] = {};
 			const set = <K extends keyof PricingSettings['overrides']>(
 				k: K,
@@ -183,7 +220,7 @@ export const actions: Actions = {
 				if (!(n >= 1)) throw new Error('units');
 				overrides.unitsPerOrder = n;
 			}
-			await setPricingSettings({ targetMargin: target, overrides });
+			await setPricingSettings({ ...current, targetMargin: target, overrides });
 			return { saved: 'Pricing settings saved.' };
 		} catch {
 			return fail(400, { error: 'Percentages must be 0–99 and amounts must be numbers.' });

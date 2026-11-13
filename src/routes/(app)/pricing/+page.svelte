@@ -33,7 +33,13 @@
 
 	const e = $derived(data.e);
 	const m = $derived(data.measured);
-	const o = $derived(data.settings.overrides);
+	const fixedMode = $derived(data.settings.mode === 'fixed');
+	/** What the boxes show: fixed numbers in fixed mode, overrides in adjusting mode. */
+	const o = $derived(
+		(fixedMode && data.settings.fixed ? data.settings.fixed : data.settings.overrides) as Partial<
+			NonNullable<typeof data.settings.fixed>
+		>
+	);
 
 	/** perUnit: the product's own share of the per-order cost (bulk items carry less). */
 	const profitAt = (price: number, cost: number, perUnit = e.perUnit) =>
@@ -138,7 +144,7 @@
 		>
 		<Stat
 			label="Selling cost per piece"
-			hint="Store-wide · bulk items carry less · see Cost of selling"
+			hint="{fixedMode ? 'Fixed numbers' : 'Adjusting (last 90 days)'} · bulk items carry less"
 		>
 			{formatRs(e.perUnit)} + {formatPct(e.pct)}
 		</Stat>
@@ -429,15 +435,43 @@
 			<div>
 				<Dialog.Title>Cost of selling</Dialog.Title>
 				<Dialog.Description>
-					Measured from {m.orders} delivered orders in the last {data.windowDays} days. Ads and fixed
-					costs are left out.
+					{#if fixedMode}
+						Fixed: your own numbers, used until you change them.
+					{:else}
+						Adjusting: measured from {m.orders} delivered orders in the last {data.windowDays} days.
+					{/if}
+					Ads and fixed costs are left out.
 				</Dialog.Description>
 			</div>
 			<Button variant="ghost" size="sm" onclick={() => (showCosts = !showCosts)}
-				>{showCosts ? 'Hide' : 'Adjust'}</Button
+				>{showCosts ? 'Hide' : 'Edit numbers'}</Button
 			>
 		</Dialog.Header>
 		<div class="grid gap-4">
+			<div class="flex flex-wrap items-center gap-2">
+				{#each [['adjusting', 'Adjusting — follows last 90 days'], ['fixed', 'Fixed — my numbers']] as [id, label] (id)}
+					<form method="POST" action={formAction('mode')} use:enhance>
+						<input type="hidden" name="mode" value={id} />
+						<Button
+							type="submit"
+							size="sm"
+							variant={(data.settings.mode ?? 'adjusting') === id ? 'secondary' : 'ghost'}
+							>{label}</Button
+						>
+					</form>
+				{/each}
+				{#if fixedMode}
+					<form method="POST" action={formAction('mode')} use:enhance class="ml-auto">
+						<input type="hidden" name="mode" value="fixed" />
+						<input type="hidden" name="reset" value="1" />
+						<Button type="submit" size="sm" variant="outline">Copy today's measured numbers</Button>
+					</form>
+				{/if}
+			</div>
+			<p class="text-xs text-muted-foreground">
+				Each product's share of the shipping cost uses how many pieces its orders usually have, in
+				both modes.
+			</p>
 			<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
 				<div>
 					<span class="text-muted-foreground">Courier + returns / order</span>
@@ -486,7 +520,9 @@
 					}}
 				>
 					<p class="text-xs text-muted-foreground">
-						Leave a box empty to use the measured value (shown faded).
+						{fixedMode
+							? 'Your fixed numbers. Faded hint = what the last 90 days measured.'
+							: 'Leave a box empty to use the measured value (shown faded).'}
 					</p>
 					<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
 						<div class="grid gap-1.5">
