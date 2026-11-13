@@ -39,9 +39,15 @@ export type PricingSettings = {
 	mode?: 'adjusting' | 'fixed';
 	/** Adjusting mode: owner overrides of single measured values. */
 	overrides: Partial<CostInputs>;
-	/** Fixed mode: every value set by the owner. */
+	/** Unused since fixed mode became cost-plus (kept so old saved settings still parse). */
 	fixed?: CostInputs;
+	/** Fixed mode: price = cost × multiplier ÷ (1 − COD tax). E.g. 2.5. */
+	multiplier?: number;
 };
+
+/** Courier tax withheld on COD (ITWH 2% + STWH 2%). Fixed mode applies it to every sale. */
+export const COD_TAX = 0.04;
+export const DEFAULT_MULTIPLIER = 2.5;
 
 const COST_KEYS = [
 	'unitsPerOrder',
@@ -55,7 +61,7 @@ const COST_KEYS = [
 
 /** The selling-cost numbers currently in use, as a plain set (for freezing into fixed mode). */
 export function currentInputs(m: SellingCosts, s: PricingSettings): CostInputs {
-	const e = effective(m, s);
+	const e = effective(m, { ...s, mode: 'adjusting' });
 	return Object.fromEntries(COST_KEYS.map((k) => [k, e[k]])) as CostInputs;
 }
 
@@ -138,11 +144,16 @@ export async function measuredCosts(): Promise<SellingCosts> {
 
 /** Measured costs with owner overrides applied, plus the two numbers the formula needs. */
 export function effective(m: SellingCosts, s: PricingSettings) {
-	const c = s.mode === 'fixed' && s.fixed ? { ...m, ...s.fixed } : { ...m, ...s.overrides };
+	const c = { ...m, ...s.overrides };
 	const pct = c.withholdingPct + c.advancePct + c.otherDiscountPct;
 	const perOrder = c.courierPerOrder + c.packagingPerOrder - c.shippingPerOrder;
 	const perUnit = Math.round(perOrder / Math.max(1, c.unitsPerOrder));
-	return { ...c, pct, perOrder, perUnit, target: s.targetMargin, mode: s.mode ?? 'adjusting' };
+	const mode = s.mode ?? 'adjusting';
+	const multiplier = s.multiplier ?? DEFAULT_MULTIPLIER;
+	// Fixed mode's "target" = the margin its multiplier gives: profit / price = (1 − tax)(M − 1) / M.
+	const target =
+		mode === 'fixed' ? ((1 - COD_TAX) * (multiplier - 1)) / multiplier : s.targetMargin;
+	return { ...c, pct, perOrder, perUnit, target, mode, multiplier };
 }
 export type Effective = ReturnType<typeof effective>;
 
@@ -152,14 +163,22 @@ export function round99(paisa: number) {
 	return (Math.ceil((rs + 1) / 100) * 100 - 1) * 100;
 }
 
-/** `perUnit` = this product's share of the per-order cost (see productPerUnit); default store-wide. */
+/**
+ * Profit per piece.
+ *   adjusting: price × (1 − pct) − cost − perUnit  (perUnit = product's share of the per-order cost)
+ *   fixed:     price × (1 − 4%) − cost              (cost-plus; the Rs 500 minimum order covers courier)
+ */
 export function profitPerUnit(price: number, cost: number, e: Effective, perUnit = e.perUnit) {
+	if (e.mode === 'fixed') return Math.round(price * (1 - COD_TAX) - cost);
 	return Math.round(price * (1 - e.pct) - cost - perUnit);
 }
 
+/** adjusting: hits the target margin; fixed: cost × multiplier ÷ (1 − 4%). Both end in 99. */
 export function suggestedPrice(cost: number, e: Effective, perUnit = e.perUnit): number | null {
+	if (cost <= 0) return null;
+	if (e.mode === 'fixed') return round99((cost * e.multiplier) / (1 - COD_TAX));
 	const denom = 1 - e.pct - e.target;
-	if (cost <= 0 || denom <= 0.05) return null;
+	if (denom <= 0.05) return null;
 	return round99((cost + perUnit) / denom);
 }
 

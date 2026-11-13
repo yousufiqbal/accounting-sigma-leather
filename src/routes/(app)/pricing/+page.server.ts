@@ -4,7 +4,7 @@ import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import {
 	effective,
-	currentInputs,
+	DEFAULT_MULTIPLIER,
 	getPricingSettings,
 	measuredCosts,
 	productPerUnit,
@@ -162,45 +162,34 @@ const rsField = (f: FormData, k: string) => {
 export const actions: Actions = {
 	/** Switch between adjusting (last 90 days) and fixed (own numbers) selling costs. */
 	mode: async ({ request }) => {
-		const f = await request.formData();
-		const mode = f.get('mode') === 'fixed' ? 'fixed' : 'adjusting';
-		const [measured, settings] = await Promise.all([measuredCosts(), getPricingSettings()]);
-		// First switch to fixed (or "copy measured"): freeze today's measured numbers.
-		const fresh = currentInputs(measured, { ...settings, mode: 'adjusting' });
-		const fixed = f.get('reset') ? fresh : (settings.fixed ?? fresh);
-		await setPricingSettings({ ...settings, mode, fixed });
+		const mode = (await request.formData()).get('mode') === 'fixed' ? 'fixed' : 'adjusting';
+		const settings = await getPricingSettings();
+		await setPricingSettings({
+			...settings,
+			mode,
+			multiplier: settings.multiplier ?? DEFAULT_MULTIPLIER
+		});
 		return {
 			saved:
 				mode === 'fixed'
-					? 'Fixed mode: suggestions use your numbers until you change them.'
+					? 'Fixed mode: price = cost × multiplier, after 4% COD tax.'
 					: 'Adjusting mode: suggestions follow the last 90 days.'
 		};
 	},
 
 	settings: async ({ request }) => {
 		const f = await request.formData();
+		const current = await getPricingSettings();
+		if (current.mode === 'fixed') {
+			const mult = Number(String(f.get('multiplier') ?? '').replace(/[x×,\s]/gi, ''));
+			if (!(mult > 1 && mult <= 20))
+				return fail(400, { error: 'Multiplier must be above 1, e.g. 2.5.' });
+			await setPricingSettings({ ...current, multiplier: mult });
+			return { saved: `Markup set to ${mult}×.` };
+		}
 		try {
 			const target = pctField(f, 'targetMargin');
 			if (target === undefined) return fail(400, { error: 'Enter a target margin.' });
-			const current = await getPricingSettings();
-			if (current.mode === 'fixed') {
-				// Fixed: every box is a value; an empty box keeps the previous number.
-				const prev = current.fixed ?? currentInputs(await measuredCosts(), current);
-				const u = String(f.get('unitsPerOrder') ?? '').trim();
-				const units = u ? Number(u) : prev.unitsPerOrder;
-				if (!(units >= 1)) throw new Error('units');
-				const fixed = {
-					unitsPerOrder: units,
-					withholdingPct: pctField(f, 'withholdingPct') ?? prev.withholdingPct,
-					advancePct: pctField(f, 'advancePct') ?? prev.advancePct,
-					otherDiscountPct: pctField(f, 'otherDiscountPct') ?? prev.otherDiscountPct,
-					courierPerOrder: rsField(f, 'courierPerOrder') ?? prev.courierPerOrder,
-					packagingPerOrder: rsField(f, 'packagingPerOrder') ?? prev.packagingPerOrder,
-					shippingPerOrder: rsField(f, 'shippingPerOrder') ?? prev.shippingPerOrder
-				};
-				await setPricingSettings({ ...current, targetMargin: target, fixed });
-				return { saved: 'Fixed numbers saved.' };
-			}
 			const overrides: PricingSettings['overrides'] = {};
 			const set = <K extends keyof PricingSettings['overrides']>(
 				k: K,

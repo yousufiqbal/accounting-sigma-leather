@@ -34,16 +34,21 @@
 	const e = $derived(data.e);
 	const m = $derived(data.measured);
 	const fixedMode = $derived(data.settings.mode === 'fixed');
-	/** What the boxes show: fixed numbers in fixed mode, overrides in adjusting mode. */
-	const o = $derived(
-		(fixedMode && data.settings.fixed ? data.settings.fixed : data.settings.overrides) as Partial<
-			NonNullable<typeof data.settings.fixed>
-		>
+	const o = $derived(data.settings.overrides);
+	/** Example for the fixed-mode explanation: a product costing Rs 1,000. */
+	const example = $derived(
+		[2, 2.5, 3].map((mult) => {
+			const price = Math.ceil(((1000 * mult) / (1 - COD_TAX) + 1) / 100) * 100 - 1;
+			return { mult, price, profit: Math.round(price * (1 - COD_TAX) - 1000) };
+		})
 	);
 
 	/** perUnit: the product's own share of the per-order cost (bulk items carry less). */
 	const profitAt = (price: number, cost: number, perUnit = e.perUnit) =>
-		Math.round(price * (1 - e.pct) - cost - perUnit);
+		e.mode === 'fixed'
+			? Math.round(price * (1 - COD_TAX) - cost) // cost-plus: only the 4% COD tax
+			: Math.round(price * (1 - e.pct) - cost - perUnit);
+	const COD_TAX = 0.04;
 	const parse = (s: string) => {
 		const n = Number(s.replace(/[,\s]/g, ''));
 		return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
@@ -133,7 +138,15 @@
 	</div>
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
-		<Stat label="Target margin" hint="True profit as % of price">{formatPct(e.target, 0)}</Stat>
+		{#if fixedMode}
+			<Stat
+				label="Markup"
+				hint="Price = cost × {e.multiplier} ÷ 0.96 · ≈{formatPct(e.target, 0)} margin"
+				>{e.multiplier}×</Stat
+			>
+		{:else}
+			<Stat label="Target margin" hint="True profit as % of price">{formatPct(e.target, 0)}</Stat>
+		{/if}
 		<Stat label="Your margin now" hint="Weighted by units sold, last {data.windowDays} days">
 			<span class={tone(data.summary.weightedMargin)}
 				>{data.summary.weightedMargin === null ? '—' : formatPct(data.summary.weightedMargin)}</span
@@ -142,12 +155,16 @@
 		<Stat label="Product profit / month" hint="Before ads and fixed costs"
 			>{formatRs(data.summary.monthlyProfit)}</Stat
 		>
-		<Stat
-			label="Selling cost per piece"
-			hint="{fixedMode ? 'Fixed numbers' : 'Adjusting (last 90 days)'} · bulk items carry less"
-		>
-			{formatRs(e.perUnit)} + {formatPct(e.pct)}
-		</Stat>
+		{#if fixedMode}
+			<Stat
+				label="Selling cost"
+				hint="Fixed mode: courier & packaging covered by the Rs 500 minimum">4% COD tax</Stat
+			>
+		{:else}
+			<Stat label="Selling cost per piece" hint="Adjusting (last 90 days) · bulk items carry less">
+				{formatRs(e.perUnit)} + {formatPct(e.pct)}
+			</Stat>
+		{/if}
 	</div>
 
 	<Card.Root>
@@ -275,14 +292,16 @@
 							<Table.Cell class="text-right font-medium"><Money paisa={r.price} /></Table.Cell>
 							<Table.Cell
 								class="text-right"
-								title={r.piecesPerOrder
-									? `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price — orders with this product usually have ${r.piecesPerOrder} pieces`
-									: `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price (store-wide: few orders yet)`}
+								title={fixedMode
+									? `Price × 0.96 (4% COD tax) − cost`
+									: r.piecesPerOrder
+										? `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price — orders with this product usually have ${r.piecesPerOrder} pieces`
+										: `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price (store-wide: few orders yet)`}
 							>
 								{#if r.profit !== null}
 									<span class={['num font-medium', tone(r.margin)]}>{formatRs(r.profit)}</span>
 									<div class={['text-xs', tone(r.margin)]}>{formatPct(r.margin ?? 0, 0)}</div>
-									{#if r.piecesPerOrder && r.piecesPerOrder !== Math.round(e.unitsPerOrder)}<div
+									{#if !fixedMode && r.piecesPerOrder && r.piecesPerOrder !== Math.round(e.unitsPerOrder)}<div
 											class="text-[11px] text-muted-foreground"
 										>
 											~{r.piecesPerOrder} pcs/order
@@ -439,14 +458,14 @@
 		<Dialog.Header>
 			<Dialog.Title>Cost of selling</Dialog.Title>
 			<Dialog.Description>
-				What each sale costs besides the product itself. Ads, salaries and rent are not included —
-				the target margin covers them.
+				How suggested prices are worked out. Ads, salaries and rent are not included — the margin
+				covers them.
 			</Dialog.Description>
 		</Dialog.Header>
 
 		<!-- Mode -->
 		<div class="grid grid-cols-2 gap-2">
-			{#each [{ id: 'adjusting', title: 'Adjusting', sub: `Follows the last ${data.windowDays} days` }, { id: 'fixed', title: 'Fixed', sub: 'Your own numbers' }] as opt (opt.id)}
+			{#each [{ id: 'adjusting', title: 'Adjusting', sub: `Follows the last ${data.windowDays} days` }, { id: 'fixed', title: 'Fixed', sub: 'Cost × markup' }] as opt (opt.id)}
 				{@const active = (data.settings.mode ?? 'adjusting') === opt.id}
 				<form method="POST" action={formAction('mode')} use:enhance>
 					<input type="hidden" name="mode" value={opt.id} />
@@ -510,104 +529,143 @@
 				</div>
 			{/snippet}
 
-			<div class="rounded-lg border px-4 py-2">
-				{@render row(
-					'Target margin',
-					'targetMargin',
-					formatPct(e.target, 0),
-					pct(data.settings.targetMargin),
-					'',
-					'pct'
-				)}
-			</div>
-
-			<div class="grid gap-1">
-				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Per order</p>
-				<div class="divide-y rounded-lg border px-4 py-1">
+			{#if fixedMode}
+				<div class="rounded-lg border px-4 py-2">
 					{@render row(
-						'Courier + returns',
-						'courierPerOrder',
-						formatRs(e.courierPerOrder),
-						o.courierPerOrder !== undefined ? rs(o.courierPerOrder) : '',
-						rs(m.courierPerOrder),
-						'rs'
+						'Markup on cost',
+						'multiplier',
+						`${e.multiplier}×`,
+						String(e.multiplier),
+						'2.5',
+						'n'
 					)}
-					{@render row(
-						'Packaging',
-						'packagingPerOrder',
-						formatRs(e.packagingPerOrder),
-						o.packagingPerOrder !== undefined ? rs(o.packagingPerOrder) : '',
-						rs(m.packagingPerOrder),
-						'rs'
-					)}
-					{@render row(
-						'Shipping the customer pays',
-						'shippingPerOrder',
-						`−${formatRs(e.shippingPerOrder)}`,
-						o.shippingPerOrder !== undefined ? rs(o.shippingPerOrder) : '',
-						rs(m.shippingPerOrder),
-						'rs',
-						'text-success'
-					)}
-					<div class="flex items-center justify-between py-1.5 font-medium">
-						<span class="text-sm">Net per order</span>
-						<span class="num text-sm">{formatRs(e.perOrder)}</span>
+				</div>
+				<div class="rounded-lg bg-muted/60 px-4 py-3 text-sm">
+					<p class="font-medium">Suggested price = cost × {e.multiplier} ÷ 0.96, ending in 99</p>
+					<p class="mt-1 text-xs text-muted-foreground">
+						÷ 0.96 so you still keep cost × {e.multiplier} after PostEx withholds 4%. Advance orders get
+						5% off instead, so the same allowance covers them. Courier and packaging are not counted —
+						the Rs 500 minimum order covers them.
+					</p>
+					<div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+						{#each example as x (x.mult)}
+							<div
+								class={[
+									'rounded-md border bg-card px-2 py-1.5',
+									x.mult === e.multiplier && 'border-primary'
+								]}
+							>
+								<div class="font-medium">{x.mult}×</div>
+								<div class="text-muted-foreground">Cost Rs 1,000 → {formatRs(x.price * 100)}</div>
+								<div class="text-success">Profit {formatRs(x.profit * 100)}</div>
+							</div>
+						{/each}
 					</div>
 				</div>
-			</div>
+			{:else}
+				<div class="rounded-lg border px-4 py-2">
+					{@render row(
+						'Target margin',
+						'targetMargin',
+						formatPct(e.target, 0),
+						pct(data.settings.targetMargin),
+						'',
+						'pct'
+					)}
+				</div>
 
-			<div class="grid gap-1">
-				<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">% of price</p>
-				<div class="divide-y rounded-lg border px-4 py-1">
-					{@render row(
-						'Tax withheld by courier',
-						'withholdingPct',
-						formatPct(e.withholdingPct),
-						o.withholdingPct !== undefined ? pct(o.withholdingPct) : '',
-						pct(m.withholdingPct),
-						'pct'
-					)}
-					{@render row(
-						'5% advance discount',
-						'advancePct',
-						formatPct(e.advancePct),
-						o.advancePct !== undefined ? pct(o.advancePct) : '',
-						pct(m.advancePct),
-						'pct'
-					)}
-					{@render row(
-						'Other discounts',
-						'otherDiscountPct',
-						formatPct(e.otherDiscountPct),
-						o.otherDiscountPct !== undefined ? pct(o.otherDiscountPct) : '',
-						pct(m.otherDiscountPct),
-						'pct'
-					)}
-					<div class="flex items-center justify-between py-1.5 font-medium">
-						<span class="text-sm">Total</span>
-						<span class="num text-sm">{formatPct(e.pct)}</span>
+				<div class="grid gap-1">
+					<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">Per order</p>
+					<div class="divide-y rounded-lg border px-4 py-1">
+						{@render row(
+							'Courier + returns',
+							'courierPerOrder',
+							formatRs(e.courierPerOrder),
+							o.courierPerOrder !== undefined ? rs(o.courierPerOrder) : '',
+							rs(m.courierPerOrder),
+							'rs'
+						)}
+						{@render row(
+							'Packaging',
+							'packagingPerOrder',
+							formatRs(e.packagingPerOrder),
+							o.packagingPerOrder !== undefined ? rs(o.packagingPerOrder) : '',
+							rs(m.packagingPerOrder),
+							'rs'
+						)}
+						{@render row(
+							'Shipping the customer pays',
+							'shippingPerOrder',
+							`−${formatRs(e.shippingPerOrder)}`,
+							o.shippingPerOrder !== undefined ? rs(o.shippingPerOrder) : '',
+							rs(m.shippingPerOrder),
+							'rs',
+							'text-success'
+						)}
+						<div class="flex items-center justify-between py-1.5 font-medium">
+							<span class="text-sm">Net per order</span>
+							<span class="num text-sm">{formatRs(e.perOrder)}</span>
+						</div>
 					</div>
 				</div>
-			</div>
 
-			<div class="rounded-lg bg-muted/60 px-4 py-3">
-				{@render row(
-					'Pieces in a typical order',
-					'unitsPerOrder',
-					e.unitsPerOrder.toFixed(1),
-					o.unitsPerOrder !== undefined ? String(o.unitsPerOrder) : '',
-					m.unitsPerOrder.toFixed(1),
-					'n'
-				)}
-				<div class="flex items-center justify-between gap-3 pt-1">
-					<span class="text-sm font-medium">Selling cost per piece</span>
-					<span class="num font-semibold">{formatRs(e.perUnit)} + {formatPct(e.pct)} of price</span>
+				<div class="grid gap-1">
+					<p class="text-xs font-medium tracking-wide text-muted-foreground uppercase">
+						% of price
+					</p>
+					<div class="divide-y rounded-lg border px-4 py-1">
+						{@render row(
+							'Tax withheld by courier',
+							'withholdingPct',
+							formatPct(e.withholdingPct),
+							o.withholdingPct !== undefined ? pct(o.withholdingPct) : '',
+							pct(m.withholdingPct),
+							'pct'
+						)}
+						{@render row(
+							'5% advance discount',
+							'advancePct',
+							formatPct(e.advancePct),
+							o.advancePct !== undefined ? pct(o.advancePct) : '',
+							pct(m.advancePct),
+							'pct'
+						)}
+						{@render row(
+							'Other discounts',
+							'otherDiscountPct',
+							formatPct(e.otherDiscountPct),
+							o.otherDiscountPct !== undefined ? pct(o.otherDiscountPct) : '',
+							pct(m.otherDiscountPct),
+							'pct'
+						)}
+						<div class="flex items-center justify-between py-1.5 font-medium">
+							<span class="text-sm">Total</span>
+							<span class="num text-sm">{formatPct(e.pct)}</span>
+						</div>
+					</div>
 				</div>
-				<p class="mt-1 text-xs text-muted-foreground">
-					Products usually bought in bulk carry less per piece — each uses how many pieces its own
-					orders have.
-				</p>
-			</div>
+
+				<div class="rounded-lg bg-muted/60 px-4 py-3">
+					{@render row(
+						'Pieces in a typical order',
+						'unitsPerOrder',
+						e.unitsPerOrder.toFixed(1),
+						o.unitsPerOrder !== undefined ? String(o.unitsPerOrder) : '',
+						m.unitsPerOrder.toFixed(1),
+						'n'
+					)}
+					<div class="flex items-center justify-between gap-3 pt-1">
+						<span class="text-sm font-medium">Selling cost per piece</span>
+						<span class="num font-semibold"
+							>{formatRs(e.perUnit)} + {formatPct(e.pct)} of price</span
+						>
+					</div>
+					<p class="mt-1 text-xs text-muted-foreground">
+						Products usually bought in bulk carry less per piece — each uses how many pieces its own
+						orders have.
+					</p>
+				</div>
+			{/if}
 
 			<div class="flex flex-wrap items-center gap-2">
 				{#if showCosts}
@@ -615,7 +673,7 @@
 					>
 					<Button type="button" variant="ghost" onclick={() => (showCosts = false)}>Cancel</Button>
 					<span class="text-xs text-muted-foreground">
-						{fixedMode ? 'Hint = last 90 days.' : 'Empty box = measured value (hint).'}
+						{fixedMode ? 'e.g. 2, 2.5 or 3' : 'Empty box = measured value (hint).'}
 					</span>
 				{:else}
 					<Button type="button" variant="outline" onclick={() => (showCosts = true)}
@@ -624,15 +682,5 @@
 				{/if}
 			</div>
 		</form>
-
-		{#if fixedMode && !showCosts}
-			<form method="POST" action={formAction('mode')} use:enhance class="-mt-2">
-				<input type="hidden" name="mode" value="fixed" />
-				<input type="hidden" name="reset" value="1" />
-				<Button type="submit" size="sm" variant="link" class="px-0"
-					>Replace my numbers with the last 90 days</Button
-				>
-			</form>
-		{/if}
 	</Dialog.Content>
 </Dialog.Root>
