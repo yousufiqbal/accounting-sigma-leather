@@ -363,7 +363,7 @@
 		<Card.Content class="overflow-x-auto px-0">
 			<!-- Spreadsheet-style entry: Enter/↓/↑ move between rows, paste from Excel fills down/across. -->
 			<div role="presentation" onkeydown={gridKeys} onpaste={gridPaste}>
-				<Table.Root>
+				<Table.Root sticky>
 					<Table.Header>
 						<Table.Row>
 							<Table.Head class="pl-6">Product</Table.Head>

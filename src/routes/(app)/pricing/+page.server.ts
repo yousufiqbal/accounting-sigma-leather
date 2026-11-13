@@ -6,6 +6,8 @@ import {
 	effective,
 	getPricingSettings,
 	measuredCosts,
+	productPerUnit,
+	productUnitsPerOrder,
 	profitPerUnit,
 	pushPrices,
 	setPricingSettings,
@@ -15,7 +17,6 @@ import {
 } from '#lib/server/pricing.js';
 import type { Actions, PageServerLoad } from './$types';
 
-const PAGE_SIZE = 100;
 const VIEWS = ['losing', 'below', 'nocost', 'best', 'all'] as const;
 type View = (typeof VIEWS)[number];
 const v = schema.variants;
@@ -25,7 +26,6 @@ export const load: PageServerLoad = async ({ url }) => {
 		? (url.searchParams.get('view') as View)
 		: 'below';
 	const q = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
-	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
 	const [measured, settings] = await Promise.all([measuredCosts(), getPricingSettings()]);
 	const e = effective(measured, settings);
@@ -68,16 +68,22 @@ export const load: PageServerLoad = async ({ url }) => {
 		group by l.variant_id`)) as { id: string; sold: number; returned: number }[];
 	const salesBy = new Map(sales.map((s) => [s.id, s]));
 
+	const pattern = await productUnitsPerOrder();
 	const rows = variants.map((x) => {
 		const s = salesBy.get(x.id);
-		const profit = x.cost > 0 ? profitPerUnit(x.price, x.cost, e) : null;
+		const own = pattern.get(x.productId);
+		const perUnit = productPerUnit(e, own);
+		const profit = x.cost > 0 ? profitPerUnit(x.price, x.cost, e, perUnit) : null;
 		return {
 			...x,
 			sold: s?.sold ?? 0,
 			returned: s?.returned ?? 0,
 			profit,
 			margin: profit !== null && x.price > 0 ? profit / x.price : null,
-			suggested: x.cost > 0 ? suggestedPrice(x.cost, e) : null
+			perUnit,
+			/** Typical pieces per order for this product (null = store-wide figure used). */
+			piecesPerOrder: own?.units ?? null,
+			suggested: x.cost > 0 ? suggestedPrice(x.cost, e, perUnit) : null
 		};
 	});
 
@@ -123,8 +129,6 @@ export const load: PageServerLoad = async ({ url }) => {
 	return {
 		view,
 		q,
-		page,
-		pageCount: Math.max(1, Math.ceil(list.length / PAGE_SIZE)),
 		totalRows: list.length,
 		counts,
 		measured,
@@ -135,7 +139,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			weightedMargin: revenue ? profit / revenue : null,
 			monthlyProfit: Math.round((profit * 30) / WINDOW_DAYS)
 		},
-		rows: list.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+		rows: list // all at once (no pages)
 	};
 };
 

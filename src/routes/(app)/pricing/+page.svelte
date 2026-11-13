@@ -1,4 +1,6 @@
 <script lang="ts">
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
+	import Calculator from '@lucide/svelte/icons/calculator';
 	import { productGroups } from '#lib/group-rows.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
@@ -18,6 +20,7 @@
 	import { formatPct, formatRs } from '#lib/money.js';
 	import type { PageProps } from './$types';
 
+	let costsOpen = $state(false);
 	let { data, form }: PageProps = $props();
 	const groups = $derived(productGroups(data.rows));
 	type Row = (typeof data.rows)[number];
@@ -32,8 +35,9 @@
 	const m = $derived(data.measured);
 	const o = $derived(data.settings.overrides);
 
-	const profitAt = (price: number, cost: number) =>
-		Math.round(price * (1 - e.pct) - cost - e.perUnit);
+	/** perUnit: the product's own share of the per-order cost (bulk items carry less). */
+	const profitAt = (price: number, cost: number, perUnit = e.perUnit) =>
+		Math.round(price * (1 - e.pct) - cost - perUnit);
 	const parse = (s: string) => {
 		const n = Number(s.replace(/[,\s]/g, ''));
 		return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null;
@@ -78,7 +82,10 @@
 		Math.round(
 			changes.reduce(
 				(t, c) =>
-					t + (c.r.cost > 0 ? (profitAt(c.price, c.r.cost) - (c.r.profit ?? 0)) * c.r.sold : 0),
+					t +
+					(c.r.cost > 0
+						? (profitAt(c.price, c.r.cost, c.r.perUnit) - (c.r.profit ?? 0)) * c.r.sold
+						: 0),
 				0
 			) *
 				(30 / data.windowDays)
@@ -114,6 +121,9 @@
 				hit your target margin and end in 99.
 			</p>
 		</div>
+		<Button variant="outline" onclick={() => (costsOpen = true)}
+			><Calculator /> Cost of selling</Button
+		>
 	</div>
 
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -126,25 +136,281 @@
 		<Stat label="Product profit / month" hint="Before ads and fixed costs"
 			>{formatRs(data.summary.monthlyProfit)}</Stat
 		>
-		<Stat label="Selling cost per piece" hint="{formatPct(e.pct)} of price + Rs {rs(e.perUnit)}">
+		<Stat
+			label="Selling cost per piece"
+			hint="Store-wide · bulk items carry less · see Cost of selling"
+		>
 			{formatRs(e.perUnit)} + {formatPct(e.pct)}
 		</Stat>
 	</div>
 
 	<Card.Root>
-		<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
-			<div>
-				<Card.Title>Cost of selling</Card.Title>
+		<Card.Header class="gap-3" data-sveltekit-noscroll>
+			<div class="flex flex-wrap items-center gap-1">
+				{#each views as view (view.id)}
+					<Button
+						href={href({ view: view.id })}
+						size="sm"
+						variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button
+					>
+				{/each}
+				<form method="GET" class="w-full sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
+					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
+						<input type="hidden" name={k} value={val} />
+					{/each}
+					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
+				</form>
+			</div>
+			<div class="flex flex-wrap items-center justify-between gap-2">
 				<Card.Description>
+					Profit / pc = price − selling costs − cost. Each product's share of the per-order shipping
+					cost uses how many pieces its orders usually have. Green ≥ target, amber below, red
+					losing.
+					{#if data.view === 'nocost'}Add costs on the <a href="/inventory" class="underline"
+							>Inventory</a
+						> page first.{/if}
+				</Card.Description>
+				{#if data.rows.some((r) => r.suggested && r.suggested !== r.price)}
+					<Button size="sm" variant="outline" onclick={suggestAllOnPage}
+						><Wand /> Use suggested for this page</Button
+					>
+				{/if}
+			</div>
+		</Card.Header>
+		<Card.Content class="overflow-x-auto px-0">
+			<Table.Root sticky>
+				<Table.Header>
+					<Table.Row>
+						<Table.Head class="pl-6">Product</Table.Head>
+						<Table.Head class="text-right">Cost</Table.Head>
+						<Table.Head class="text-right">Sold {data.windowDays}d</Table.Head>
+						<Table.Head class="text-right">Price</Table.Head>
+						<Table.Head class="text-right">Profit / pc</Table.Head>
+						<Table.Head class="text-right">Suggested</Table.Head>
+						<Table.Head class="pr-6">New price</Table.Head>
+					</Table.Row>
+				</Table.Header>
+				<Table.Body>
+					{#each data.rows as r, i (r.id)}
+						{@const np = newPrice(r)}
+						{@const npProfit = np !== null && r.cost > 0 ? profitAt(np, r.cost, r.perUnit) : null}
+						{#if groups[i].first && groups[i].grouped}
+							<Table.Row class="bg-muted/40 hover:bg-muted/40">
+								<Table.Cell colspan={7} class="py-2 pr-6 pl-6">
+									<div class="flex items-center gap-3">
+										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
+											>{r.productTitle}</span
+										>
+										<span class="text-xs text-muted-foreground">{groups[i].size} variants</span>
+										<div class="ml-auto flex items-center gap-2">
+											<span class="text-xs text-muted-foreground">Price for all</span>
+											<Input
+												value={groupVal[r.productId] ?? ''}
+												oninput={(ev) => setGroup(r, ev.currentTarget.value)}
+												placeholder="Rs"
+												inputmode="decimal"
+												class="h-8 w-24 text-right"
+												aria-label="New price for every variant of {r.productTitle}"
+											/>
+										</div>
+									</div>
+								</Table.Cell>
+							</Table.Row>
+						{/if}
+						<Table.Row class={np !== null ? 'bg-warning-soft/40' : ''}>
+							<Table.Cell class={['max-w-80 pl-6', groups[i].grouped && 'pl-12']}>
+								<div class="flex items-center gap-3">
+									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
+									<div class="min-w-0">
+										{#if groups[i].grouped}
+											<div class="truncate">{r.variantTitle ?? 'Default'}</div>
+											{#if r.sku}<div class="truncate text-xs text-muted-foreground">
+													{r.sku}
+												</div>{/if}
+										{:else}
+											<div class="truncate font-medium" title={r.productTitle}>
+												{r.productTitle}
+											</div>
+											<div class="truncate text-xs text-muted-foreground">
+												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
+											</div>
+										{/if}
+									</div>
+								</div>
+							</Table.Cell>
+							<Table.Cell class="text-right">
+								{#if r.cost > 0}
+									<Money paisa={r.cost} />
+									{#if r.costSource !== 'batch'}<div class="text-xs text-muted-foreground">
+											estimated
+										</div>{/if}
+								{:else}<a
+										href="/inventory/opening?view=all&q={encodeURIComponent(
+											r.sku ?? r.productTitle
+										)}"
+										class="text-sm text-danger underline">add cost</a
+									>{/if}
+							</Table.Cell>
+							<Table.Cell class="num text-right">
+								{r.sold || '—'}
+								{#if r.returned}<div class="text-xs text-danger">{r.returned} returned</div>{/if}
+							</Table.Cell>
+							<Table.Cell class="text-right font-medium"><Money paisa={r.price} /></Table.Cell>
+							<Table.Cell
+								class="text-right"
+								title={r.piecesPerOrder
+									? `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price — orders with this product usually have ${r.piecesPerOrder} pieces`
+									: `Selling cost ${formatRs(r.perUnit)}/pc + ${formatPct(e.pct)} of price (store-wide: few orders yet)`}
+							>
+								{#if r.profit !== null}
+									<span class={['num font-medium', tone(r.margin)]}>{formatRs(r.profit)}</span>
+									<div class={['text-xs', tone(r.margin)]}>{formatPct(r.margin ?? 0, 0)}</div>
+									{#if r.piecesPerOrder && r.piecesPerOrder !== Math.round(e.unitsPerOrder)}<div
+											class="text-[11px] text-muted-foreground"
+										>
+											~{r.piecesPerOrder} pcs/order
+										</div>{/if}
+								{:else}<span class="text-muted-foreground">—</span>{/if}
+							</Table.Cell>
+							<Table.Cell class="text-right">
+								{#if r.suggested}
+									<button
+										type="button"
+										class={[
+											'num rounded px-1.5 py-0.5 font-medium hover:bg-accent',
+											r.suggested === r.price ? 'text-muted-foreground' : 'text-info'
+										]}
+										title="Use this price"
+										onclick={() => useSuggested(r)}>{formatRs(r.suggested)}</button
+									>
+								{:else}<span class="text-muted-foreground">—</span>{/if}
+							</Table.Cell>
+							<Table.Cell class="pr-6">
+								<div class="flex items-center gap-2">
+									<Input
+										value={edits[r.id]?.val ?? ''}
+										oninput={(ev) => setEdit(r, ev.currentTarget.value)}
+										placeholder={rs(r.price)}
+										inputmode="decimal"
+										class="h-8 w-24 text-right"
+										aria-label="New price for {r.productTitle} {r.variantTitle ?? ''}"
+									/>
+									{#if npProfit !== null && np}
+										<span class={['num text-xs whitespace-nowrap', tone(npProfit / np)]}
+											>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
+										>
+									{/if}
+								</div>
+							</Table.Cell>
+						</Table.Row>
+					{:else}
+						<Table.Row
+							><Table.Cell colspan={7} class="py-10 text-center text-muted-foreground"
+								>Nothing here.</Table.Cell
+							></Table.Row
+						>
+					{/each}
+				</Table.Body>
+			</Table.Root>
+		</Card.Content>
+		<Card.Footer class="text-sm text-muted-foreground">{data.totalRows} variants</Card.Footer>
+	</Card.Root>
+</div>
+
+{#if changes.length}
+	<div
+		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
+	>
+		<span class="text-sm text-muted-foreground">
+			{changes.length} price change{changes.length === 1 ? '' : 's'} ·
+			<span class={impact >= 0 ? 'text-success' : 'text-danger'}
+				>{impact >= 0 ? '+' : ''}{formatRs(impact)}/month</span
+			>
+			<span class="text-xs">if the same units sell</span>
+		</span>
+		<Button variant="ghost" onclick={() => ((edits = {}), (groupVal = {}))}>Discard</Button>
+		<Button onclick={() => (review = true)}>Review & update Shopify</Button>
+	</div>
+{/if}
+
+<Sheet.Root bind:open={review}>
+	<Sheet.Content side="right" class="w-full sm:max-w-lg">
+		<Sheet.Header>
+			<Sheet.Title>Update {changes.length} prices in Shopify</Sheet.Title>
+			<Sheet.Description>
+				Live store prices change immediately. Compare-at prices are not touched.
+			</Sheet.Description>
+		</Sheet.Header>
+		<div class="grid max-h-[60vh] gap-2 overflow-auto px-4 text-sm">
+			{#each changes as c (c.r.id)}
+				{@const after = c.r.cost > 0 ? profitAt(c.price, c.r.cost, c.r.perUnit) : null}
+				<div class="flex items-center justify-between gap-3 border-b py-2">
+					<div class="min-w-0">
+						<div class="truncate font-medium">{c.r.productTitle}</div>
+						<div class="truncate text-xs text-muted-foreground">{c.r.variantTitle ?? ''}</div>
+					</div>
+					<div class="text-right whitespace-nowrap">
+						<span class="text-muted-foreground line-through">{formatRs(c.r.price)}</span>
+						<span class="ml-1 font-medium">{formatRs(c.price)}</span>
+						{#if after !== null}<div class={['text-xs', tone(after / c.price)]}>
+								profit {formatRs(after)} / pc
+							</div>{/if}
+					</div>
+				</div>
+			{/each}
+		</div>
+		<form
+			method="POST"
+			action={formAction('push')}
+			class="grid gap-2 p-4"
+			use:enhance={() => {
+				busy = 'push';
+				return async ({ update, result }) => {
+					await update({ reset: false });
+					busy = null;
+					if (result.type === 'success') {
+						edits = {};
+						groupVal = {};
+						review = false;
+					}
+				};
+			}}
+		>
+			<input
+				type="hidden"
+				name="changes"
+				value={JSON.stringify(changes.map((c) => ({ id: c.r.id, price: String(c.price / 100) })))}
+			/>
+			<p class="text-sm">
+				Estimated effect: <b class={impact >= 0 ? 'text-success' : 'text-danger'}
+					>{impact >= 0 ? '+' : ''}{formatRs(impact)}/month</b
+				>
+				<span class="text-muted-foreground"
+					>(same units as the last {data.windowDays} days — higher prices may sell fewer)</span
+				>
+			</p>
+			<Button type="submit" disabled={!!busy}
+				>{busy === 'push' ? 'Updating Shopify…' : `Update ${changes.length} prices`}</Button
+			>
+		</form>
+	</Sheet.Content>
+</Sheet.Root>
+
+<Dialog.Root bind:open={costsOpen}>
+	<Dialog.Content class="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
+		<Dialog.Header class="flex flex-row flex-wrap items-center justify-between gap-2 pr-8">
+			<div>
+				<Dialog.Title>Cost of selling</Dialog.Title>
+				<Dialog.Description>
 					Measured from {m.orders} delivered orders in the last {data.windowDays} days. Ads and fixed
 					costs are left out.
-				</Card.Description>
+				</Dialog.Description>
 			</div>
 			<Button variant="ghost" size="sm" onclick={() => (showCosts = !showCosts)}
 				>{showCosts ? 'Hide' : 'Adjust'}</Button
 			>
-		</Card.Header>
-		<Card.Content>
+		</Dialog.Header>
+		<div class="grid gap-4">
 			<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
 				<div>
 					<span class="text-muted-foreground">Courier + returns / order</span>
@@ -275,263 +541,6 @@
 					</div>
 				</form>
 			{/if}
-		</Card.Content>
-	</Card.Root>
-
-	<Card.Root>
-		<Card.Header class="gap-3" data-sveltekit-noscroll>
-			<div class="flex flex-wrap items-center gap-1">
-				{#each views as view (view.id)}
-					<Button
-						href={href({ view: view.id })}
-						size="sm"
-						variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button
-					>
-				{/each}
-				<form method="GET" class="w-full sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
-					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
-						<input type="hidden" name={k} value={val} />
-					{/each}
-					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
-				</form>
-			</div>
-			<div class="flex flex-wrap items-center justify-between gap-2">
-				<Card.Description>
-					Profit / pc = price − selling costs − cost. Green ≥ target, amber below, red losing.
-					{#if data.view === 'nocost'}Add costs on the <a href="/inventory" class="underline"
-							>Inventory</a
-						> page first.{/if}
-				</Card.Description>
-				{#if data.rows.some((r) => r.suggested && r.suggested !== r.price)}
-					<Button size="sm" variant="outline" onclick={suggestAllOnPage}
-						><Wand /> Use suggested for this page</Button
-					>
-				{/if}
-			</div>
-		</Card.Header>
-		<Card.Content class="overflow-x-auto px-0">
-			<Table.Root>
-				<Table.Header>
-					<Table.Row>
-						<Table.Head class="pl-6">Product</Table.Head>
-						<Table.Head class="text-right">Cost</Table.Head>
-						<Table.Head class="text-right">Sold {data.windowDays}d</Table.Head>
-						<Table.Head class="text-right">Price</Table.Head>
-						<Table.Head class="text-right">Profit / pc</Table.Head>
-						<Table.Head class="text-right">Suggested</Table.Head>
-						<Table.Head class="pr-6">New price</Table.Head>
-					</Table.Row>
-				</Table.Header>
-				<Table.Body>
-					{#each data.rows as r, i (r.id)}
-						{@const np = newPrice(r)}
-						{@const npProfit = np !== null && r.cost > 0 ? profitAt(np, r.cost) : null}
-						{#if groups[i].first && groups[i].grouped}
-							<Table.Row class="bg-muted/40 hover:bg-muted/40">
-								<Table.Cell colspan={7} class="py-2 pr-6 pl-6">
-									<div class="flex items-center gap-3">
-										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
-											>{r.productTitle}</span
-										>
-										<span class="text-xs text-muted-foreground">{groups[i].size} variants</span>
-										<div class="ml-auto flex items-center gap-2">
-											<span class="text-xs text-muted-foreground">Price for all</span>
-											<Input
-												value={groupVal[r.productId] ?? ''}
-												oninput={(ev) => setGroup(r, ev.currentTarget.value)}
-												placeholder="Rs"
-												inputmode="decimal"
-												class="h-8 w-24 text-right"
-												aria-label="New price for every variant of {r.productTitle}"
-											/>
-										</div>
-									</div>
-								</Table.Cell>
-							</Table.Row>
-						{/if}
-						<Table.Row class={np !== null ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class={['max-w-80 pl-6', groups[i].grouped && 'pl-12']}>
-								<div class="flex items-center gap-3">
-									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
-									<div class="min-w-0">
-										{#if groups[i].grouped}
-											<div class="truncate">{r.variantTitle ?? 'Default'}</div>
-											{#if r.sku}<div class="truncate text-xs text-muted-foreground">
-													{r.sku}
-												</div>{/if}
-										{:else}
-											<div class="truncate font-medium" title={r.productTitle}>
-												{r.productTitle}
-											</div>
-											<div class="truncate text-xs text-muted-foreground">
-												{r.variantTitle ?? ''}{r.variantTitle && r.sku ? ' · ' : ''}{r.sku ?? ''}
-											</div>
-										{/if}
-									</div>
-								</div>
-							</Table.Cell>
-							<Table.Cell class="text-right">
-								{#if r.cost > 0}
-									<Money paisa={r.cost} />
-									{#if r.costSource !== 'batch'}<div class="text-xs text-muted-foreground">
-											estimated
-										</div>{/if}
-								{:else}<a
-										href="/inventory/opening?view=all&q={encodeURIComponent(
-											r.sku ?? r.productTitle
-										)}"
-										class="text-sm text-danger underline">add cost</a
-									>{/if}
-							</Table.Cell>
-							<Table.Cell class="num text-right">
-								{r.sold || '—'}
-								{#if r.returned}<div class="text-xs text-danger">{r.returned} returned</div>{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right font-medium"><Money paisa={r.price} /></Table.Cell>
-							<Table.Cell class="text-right">
-								{#if r.profit !== null}
-									<span class={['num font-medium', tone(r.margin)]}>{formatRs(r.profit)}</span>
-									<div class={['text-xs', tone(r.margin)]}>{formatPct(r.margin ?? 0, 0)}</div>
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</Table.Cell>
-							<Table.Cell class="text-right">
-								{#if r.suggested}
-									<button
-										type="button"
-										class={[
-											'num rounded px-1.5 py-0.5 font-medium hover:bg-accent',
-											r.suggested === r.price ? 'text-muted-foreground' : 'text-info'
-										]}
-										title="Use this price"
-										onclick={() => useSuggested(r)}>{formatRs(r.suggested)}</button
-									>
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</Table.Cell>
-							<Table.Cell class="pr-6">
-								<div class="flex items-center gap-2">
-									<Input
-										value={edits[r.id]?.val ?? ''}
-										oninput={(ev) => setEdit(r, ev.currentTarget.value)}
-										placeholder={rs(r.price)}
-										inputmode="decimal"
-										class="h-8 w-24 text-right"
-										aria-label="New price for {r.productTitle} {r.variantTitle ?? ''}"
-									/>
-									{#if npProfit !== null && np}
-										<span class={['num text-xs whitespace-nowrap', tone(npProfit / np)]}
-											>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
-										>
-									{/if}
-								</div>
-							</Table.Cell>
-						</Table.Row>
-					{:else}
-						<Table.Row
-							><Table.Cell colspan={7} class="py-10 text-center text-muted-foreground"
-								>Nothing here.</Table.Cell
-							></Table.Row
-						>
-					{/each}
-				</Table.Body>
-			</Table.Root>
-		</Card.Content>
-		{#if data.pageCount > 1}
-			<Card.Footer class="flex items-center justify-between text-sm text-muted-foreground">
-				<span>{data.totalRows} variants · page {data.page} of {data.pageCount}</span>
-				<div class="flex gap-2">
-					<Button
-						size="sm"
-						variant="outline"
-						href={href({ page: data.page - 1 })}
-						disabled={data.page <= 1}>Previous</Button
-					>
-					<Button
-						size="sm"
-						variant="outline"
-						href={href({ page: data.page + 1 })}
-						disabled={data.page >= data.pageCount}>Next</Button
-					>
-				</div>
-			</Card.Footer>
-		{/if}
-	</Card.Root>
-</div>
-
-{#if changes.length}
-	<div
-		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
-	>
-		<span class="text-sm text-muted-foreground">
-			{changes.length} price change{changes.length === 1 ? '' : 's'} ·
-			<span class={impact >= 0 ? 'text-success' : 'text-danger'}
-				>{impact >= 0 ? '+' : ''}{formatRs(impact)}/month</span
-			>
-			<span class="text-xs">if the same units sell</span>
-		</span>
-		<Button variant="ghost" onclick={() => ((edits = {}), (groupVal = {}))}>Discard</Button>
-		<Button onclick={() => (review = true)}>Review & update Shopify</Button>
-	</div>
-{/if}
-
-<Sheet.Root bind:open={review}>
-	<Sheet.Content side="right" class="w-full sm:max-w-lg">
-		<Sheet.Header>
-			<Sheet.Title>Update {changes.length} prices in Shopify</Sheet.Title>
-			<Sheet.Description>
-				Live store prices change immediately. Compare-at prices are not touched.
-			</Sheet.Description>
-		</Sheet.Header>
-		<div class="grid max-h-[60vh] gap-2 overflow-auto px-4 text-sm">
-			{#each changes as c (c.r.id)}
-				{@const after = c.r.cost > 0 ? profitAt(c.price, c.r.cost) : null}
-				<div class="flex items-center justify-between gap-3 border-b py-2">
-					<div class="min-w-0">
-						<div class="truncate font-medium">{c.r.productTitle}</div>
-						<div class="truncate text-xs text-muted-foreground">{c.r.variantTitle ?? ''}</div>
-					</div>
-					<div class="text-right whitespace-nowrap">
-						<span class="text-muted-foreground line-through">{formatRs(c.r.price)}</span>
-						<span class="ml-1 font-medium">{formatRs(c.price)}</span>
-						{#if after !== null}<div class={['text-xs', tone(after / c.price)]}>
-								profit {formatRs(after)} / pc
-							</div>{/if}
-					</div>
-				</div>
-			{/each}
 		</div>
-		<form
-			method="POST"
-			action={formAction('push')}
-			class="grid gap-2 p-4"
-			use:enhance={() => {
-				busy = 'push';
-				return async ({ update, result }) => {
-					await update({ reset: false });
-					busy = null;
-					if (result.type === 'success') {
-						edits = {};
-						groupVal = {};
-						review = false;
-					}
-				};
-			}}
-		>
-			<input
-				type="hidden"
-				name="changes"
-				value={JSON.stringify(changes.map((c) => ({ id: c.r.id, price: String(c.price / 100) })))}
-			/>
-			<p class="text-sm">
-				Estimated effect: <b class={impact >= 0 ? 'text-success' : 'text-danger'}
-					>{impact >= 0 ? '+' : ''}{formatRs(impact)}/month</b
-				>
-				<span class="text-muted-foreground"
-					>(same units as the last {data.windowDays} days — higher prices may sell fewer)</span
-				>
-			</p>
-			<Button type="submit" disabled={!!busy}
-				>{busy === 'push' ? 'Updating Shopify…' : `Update ${changes.length} prices`}</Button
-			>
-		</form>
-	</Sheet.Content>
-</Sheet.Root>
+	</Dialog.Content>
+</Dialog.Root>

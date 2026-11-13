@@ -89,7 +89,9 @@ export async function measuredCosts(): Promise<SellingCosts> {
 		)
 		select (select sum(qty) from order_lines l where l.order_id = o.id and l.qty > 0) as units
 		from d join orders o on o.id = d.order_id
-		where d.at >= ${since} and o.cancelled_at is null and o.total_paisa > 0`)) as { units: number | null }[]
+		where d.at >= ${since} and o.cancelled_at is null and o.total_paisa > 0`)) as {
+			units: number | null;
+		}[]
 	)
 		.map((r) => Number(r.units ?? 0))
 		.filter((u) => u > 0)
@@ -124,14 +126,66 @@ export function round99(paisa: number) {
 	return (Math.ceil((rs + 1) / 100) * 100 - 1) * 100;
 }
 
-export function profitPerUnit(price: number, cost: number, e: Effective) {
-	return Math.round(price * (1 - e.pct) - cost - e.perUnit);
+/** `perUnit` = this product's share of the per-order cost (see productPerUnit); default store-wide. */
+export function profitPerUnit(price: number, cost: number, e: Effective, perUnit = e.perUnit) {
+	return Math.round(price * (1 - e.pct) - cost - perUnit);
 }
 
-export function suggestedPrice(cost: number, e: Effective): number | null {
+export function suggestedPrice(cost: number, e: Effective, perUnit = e.perUnit): number | null {
 	const denom = 1 - e.pct - e.target;
 	if (cost <= 0 || denom <= 0.05) return null;
-	return round99((cost + e.perUnit) / denom);
+	return round99((cost + perUnit) / denom);
+}
+
+/** Orders needed before a product's own pieces-per-order is trusted over the store-wide one. */
+export const MIN_PRODUCT_ORDERS = 3;
+/** Buying pattern changes slowly — look back a year. */
+const PATTERN_DAYS = 365;
+
+/**
+ * Pieces per order FOR EACH PRODUCT: median total pieces in delivered orders containing it.
+ * Bulk items (sold 10–50 at a time) share one order's courier cost over many pieces; items
+ * usually bought alone carry most of it. Products with too few orders are left out (→ store-wide).
+ */
+export async function productUnitsPerOrder(): Promise<
+	Map<string, { units: number; orders: number }>
+> {
+	const since = new Date(Date.now() - PATTERN_DAYS * 86_400_000).toISOString();
+	const rows = (await db.all(sql`
+		with d as (
+			select order_id from shipments
+			where status = 'delivered' and order_id is not null and match_status != 'excluded'
+			group by order_id having min(final_at) >= ${since}
+		),
+		ou as (
+			select l.order_id, sum(l.qty) as units from order_lines l
+			where l.qty > 0 and l.order_id in (select order_id from d)
+			group by l.order_id
+		)
+		select distinct v.product_id as productId, ou.order_id as orderId, ou.units
+		from order_lines l
+		join variants v on v.id = l.variant_id
+		join ou on ou.order_id = l.order_id
+		where l.qty > 0`)) as { productId: string; orderId: string; units: number }[];
+	const by = new Map<string, number[]>();
+	for (const r of rows) {
+		const list = by.get(r.productId);
+		if (list) list.push(r.units);
+		else by.set(r.productId, [r.units]);
+	}
+	const out = new Map<string, { units: number; orders: number }>();
+	for (const [id, list] of by) {
+		if (list.length < MIN_PRODUCT_ORDERS) continue;
+		list.sort((a, b) => a - b);
+		out.set(id, { units: list[Math.floor(list.length / 2)], orders: list.length });
+	}
+	return out;
+}
+
+/** This product's share of the per-order selling cost, per piece. */
+export function productPerUnit(e: Effective, pattern: { units: number } | undefined): number {
+	if (!pattern) return e.perUnit;
+	return Math.round(e.perOrder / Math.max(1, pattern.units));
 }
 
 // ─── Push to Shopify ───────────────────────────────────────────────────────────
@@ -139,9 +193,19 @@ export function suggestedPrice(cost: number, e: Effective): number | null {
 /** Set new prices in Shopify (grouped per product), then locally + price history. */
 export async function pushPrices(changes: { id: string; price: number }[]) {
 	const vars = await db
-		.select({ id: schema.variants.id, productId: schema.variants.productId, price: schema.variants.price, cost: schema.variants.avgCost })
+		.select({
+			id: schema.variants.id,
+			productId: schema.variants.productId,
+			price: schema.variants.price,
+			cost: schema.variants.avgCost
+		})
 		.from(schema.variants)
-		.where(inArray(schema.variants.id, changes.map((c) => c.id)));
+		.where(
+			inArray(
+				schema.variants.id,
+				changes.map((c) => c.id)
+			)
+		);
 	const byId = new Map(vars.map((v) => [v.id, v]));
 	const byProduct = new Map<string, { id: string; price: number }[]>();
 	for (const c of changes) {
@@ -161,7 +225,10 @@ export async function pushPrices(changes: { id: string; price: number }[]) {
 			}`,
 			{
 				p: `gid://shopify/Product/${productId}`,
-				v: list.map((c) => ({ id: `gid://shopify/ProductVariant/${c.id}`, price: (c.price / 100).toFixed(2) }))
+				v: list.map((c) => ({
+					id: `gid://shopify/ProductVariant/${c.id}`,
+					price: (c.price / 100).toFixed(2)
+				}))
 			}
 		).catch((e) => ({ productVariantsBulkUpdate: { userErrors: [{ message: String(e) }] } }));
 		if (d.productVariantsBulkUpdate.userErrors.length) {
@@ -170,7 +237,10 @@ export async function pushPrices(changes: { id: string; price: number }[]) {
 		}
 		await db.batch(
 			list.flatMap((c) => [
-				db.update(schema.variants).set({ price: c.price, updatedAt: at }).where(eq(schema.variants.id, c.id)),
+				db
+					.update(schema.variants)
+					.set({ price: c.price, updatedAt: at })
+					.where(eq(schema.variants.id, c.id)),
 				db.insert(schema.priceChanges).values({
 					variantId: c.id,
 					at,

@@ -92,7 +92,7 @@
 			</div>
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
-			<Table.Root>
+			<Table.Root sticky>
 				<Table.Header>
 					<Table.Row>
 						<Table.Head class="pl-6">Customer</Table.Head>
