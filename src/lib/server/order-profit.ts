@@ -36,8 +36,18 @@ export type OrderProfit = {
 	courierOnly: boolean;
 };
 
-export async function orderProfits(month: string): Promise<OrderProfit[]> {
-	const { start, end } = monthBoundsUtc(month);
+/** By month (orders that finished in it), or for specific orders (any month). */
+export async function orderProfits(
+	filter: { month: string } | { ids: string[] }
+): Promise<OrderProfit[]> {
+	let where;
+	if ('month' in filter) {
+		const { start, end } = monthBoundsUtc(filter.month);
+		where = sql`s.at >= ${start} and s.at < ${end}`;
+	} else {
+		if (!filter.ids.length) return [];
+		where = sql`o.id in (select value from json_each(${JSON.stringify(filter.ids)}))`;
+	}
 	const rows = (await db.all(sql`
 		with p as (
 			select order_id,
@@ -75,7 +85,7 @@ export async function orderProfits(month: string): Promise<OrderProfit[]> {
 			where l.q > 0
 			group by l.order_id
 		) c on c.order_id = o.id
-		where s.at >= ${start} and s.at < ${end}`)) as {
+		where ${where}`)) as {
 		id: string;
 		name: string;
 		at: string;
