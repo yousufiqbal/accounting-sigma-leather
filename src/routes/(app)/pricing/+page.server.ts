@@ -1,19 +1,13 @@
 import { fail } from '@sveltejs/kit';
 import { asc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
-import { toPaisa } from '#lib/money.js';
 import {
-	effective,
-	DEFAULT_MULTIPLIER,
 	getPricingSettings,
-	measuredCosts,
-	productPerUnit,
-	productUnitsPerOrder,
+	marginFor,
 	profitPerUnit,
 	setPricingSettings,
 	suggestedPrice,
-	WINDOW_DAYS,
-	type PricingSettings
+	WINDOW_DAYS
 } from '#lib/server/pricing.js';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -27,8 +21,9 @@ export const load: PageServerLoad = async ({ url }) => {
 		: 'below';
 	const q = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
 
-	const [measured, settings] = await Promise.all([measuredCosts(), getPricingSettings()]);
-	const e = effective(measured, settings);
+	const settings = await getPricingSettings();
+	/** Markup and the margin it gives (used for colours and "Below target"). */
+	const e = { multiplier: settings.multiplier, target: marginFor(settings.multiplier) };
 	const since = new Date(Date.now() - WINDOW_DAYS * 86_400_000).toISOString();
 
 	const variants = await db
@@ -71,22 +66,16 @@ export const load: PageServerLoad = async ({ url }) => {
 		group by l.variant_id`)) as { id: string; sold: number; returned: number }[];
 	const salesBy = new Map(sales.map((s) => [s.id, s]));
 
-	const pattern = await productUnitsPerOrder();
 	const rows = variants.map((x) => {
 		const s = salesBy.get(x.id);
-		const own = pattern.get(x.productId);
-		const perUnit = productPerUnit(e, own);
-		const profit = x.cost > 0 ? profitPerUnit(x.price, x.cost, e, perUnit) : null;
+		const profit = x.cost > 0 ? profitPerUnit(x.price, x.cost) : null;
 		return {
 			...x,
 			sold: s?.sold ?? 0,
 			returned: s?.returned ?? 0,
 			profit,
 			margin: profit !== null && x.price > 0 ? profit / x.price : null,
-			perUnit,
-			/** Typical pieces per order for this product (null = store-wide figure used). */
-			piecesPerOrder: own?.units ?? null,
-			suggested: x.cost > 0 ? suggestedPrice(x.cost, e, perUnit) : null
+			suggested: suggestedPrice(x.cost, e.multiplier)
 		};
 	});
 
@@ -134,8 +123,6 @@ export const load: PageServerLoad = async ({ url }) => {
 		q,
 		totalRows: list.length,
 		counts,
-		measured,
-		settings,
 		e,
 		windowDays: WINDOW_DAYS,
 		summary: {
@@ -146,73 +133,15 @@ export const load: PageServerLoad = async ({ url }) => {
 	};
 };
 
-const pctField = (f: FormData, k: string) => {
-	const s = String(f.get(k) ?? '').trim();
-	if (s === '') return undefined;
-	const n = Number(s.replace(/[%,\s]/g, ''));
-	if (!Number.isFinite(n) || n < 0 || n >= 100) throw new Error(k);
-	return n / 100;
-};
-const rsField = (f: FormData, k: string) => {
-	const s = String(f.get(k) ?? '').trim();
-	return s === '' ? undefined : Math.abs(toPaisa(s));
-};
-
 export const actions: Actions = {
-	/** Switch between adjusting (last 90 days) and fixed (own numbers) selling costs. */
-	mode: async ({ request }) => {
-		const mode = (await request.formData()).get('mode') === 'fixed' ? 'fixed' : 'adjusting';
-		const settings = await getPricingSettings();
-		await setPricingSettings({
-			...settings,
-			mode,
-			multiplier: settings.multiplier ?? DEFAULT_MULTIPLIER
-		});
-		return {
-			saved:
-				mode === 'fixed'
-					? 'Fixed mode: price = cost × multiplier, after 4% COD tax.'
-					: 'Adjusting mode: suggestions follow the last 90 days.'
-		};
-	},
-
+	/** Markup on cost (e.g. 2.5): suggested price = cost × markup ÷ 0.96, ending in 99. */
 	settings: async ({ request }) => {
-		const f = await request.formData();
-		const current = await getPricingSettings();
-		if (current.mode === 'fixed') {
-			const mult = Number(String(f.get('multiplier') ?? '').replace(/[x×,\s]/gi, ''));
-			if (!(mult > 1 && mult <= 20))
-				return fail(400, { error: 'Multiplier must be above 1, e.g. 2.5.' });
-			await setPricingSettings({ ...current, multiplier: mult });
-			return { saved: `Markup set to ${mult}×.` };
-		}
-		try {
-			const target = pctField(f, 'targetMargin');
-			if (target === undefined) return fail(400, { error: 'Enter a target margin.' });
-			const overrides: PricingSettings['overrides'] = {};
-			const set = <K extends keyof PricingSettings['overrides']>(
-				k: K,
-				val: PricingSettings['overrides'][K] | undefined
-			) => {
-				if (val !== undefined) overrides[k] = val;
-			};
-			set('withholdingPct', pctField(f, 'withholdingPct'));
-			set('advancePct', pctField(f, 'advancePct'));
-			set('otherDiscountPct', pctField(f, 'otherDiscountPct'));
-			set('courierPerOrder', rsField(f, 'courierPerOrder'));
-			set('packagingPerOrder', rsField(f, 'packagingPerOrder'));
-			set('shippingPerOrder', rsField(f, 'shippingPerOrder'));
-			const u = String(f.get('unitsPerOrder') ?? '').trim();
-			if (u) {
-				const n = Number(u);
-				if (!(n >= 1)) throw new Error('units');
-				overrides.unitsPerOrder = n;
-			}
-			await setPricingSettings({ ...current, targetMargin: target, overrides });
-			return { saved: 'Pricing settings saved.' };
-		} catch {
-			return fail(400, { error: 'Percentages must be 0–99 and amounts must be numbers.' });
-		}
+		const mult = Number(
+			String((await request.formData()).get('multiplier') ?? '').replace(/[x×,\s]/gi, '')
+		);
+		if (!(mult > 1 && mult <= 20)) return fail(400, { error: 'Markup must be above 1, e.g. 2.5.' });
+		await setPricingSettings({ multiplier: mult });
+		return { saved: `Markup set to ${mult}×.` };
 	}
 };
 

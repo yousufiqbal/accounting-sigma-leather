@@ -2,7 +2,6 @@ import { fail } from '@sveltejs/kit';
 import { and, asc, desc, eq, gt, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { getRates, stockSummary } from '#lib/server/costing.js';
-import { syncStock } from '#lib/server/shopify-sync.js';
 import {
 	classifyStockChanges,
 	stockElsewhere,
@@ -152,17 +151,6 @@ export const load: PageServerLoad = async ({ url }) => {
 };
 
 export const actions: Actions = {
-	refresh: async () => {
-		try {
-			const r = await syncStock('recent');
-			return {
-				saved: `Pulled ${r.orders} changed orders and ${r.variants} variants from Shopify.${r.stockChanges ? ` ${r.stockChanges} stock changes need a reason.` : ''}`
-			};
-		} catch (e) {
-			return fail(502, { error: `Shopify sync failed: ${e instanceof Error ? e.message : e}` });
-		}
-	},
-
 	/** Give a reason to one or many Shopify stock changes. */
 	classify: async ({ request }) => {
 		const f = await request.formData();

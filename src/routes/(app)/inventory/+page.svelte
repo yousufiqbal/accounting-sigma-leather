@@ -3,7 +3,6 @@
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import { page } from '$app/state';
-	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import Calculator from '@lucide/svelte/icons/calculator';
 	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -87,12 +86,6 @@
 			</p>
 		</div>
 		<div class="flex flex-wrap gap-2">
-			<form method="POST" action={formAction('refresh')} use:enhance={act('refresh')}>
-				<Button type="submit" variant="outline" disabled={!!busy}>
-					<RefreshCw class={busy === 'refresh' ? 'animate-spin' : ''} />
-					{busy === 'refresh' ? 'Pulling…' : 'Pull from Shopify'}
-				</Button>
-			</form>
 			<Button variant="outline" href={openingHref}><Calculator /> Opening costs</Button>
 		</div>
 	</div>
