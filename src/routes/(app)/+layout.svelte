@@ -14,6 +14,7 @@
 	import ConfirmDialog from '#lib/components/app/confirm-dialog.svelte';
 	import Lightbox from '#lib/components/app/lightbox.svelte';
 	import SyncButton from '#lib/components/app/sync-button.svelte';
+	import CloseSidebarOnNavigate from '#lib/components/app/close-sidebar-on-navigate.svelte';
 	import { toast } from 'svelte-sonner';
 	import { replaceState } from '$app/navigation';
 	import { untrack } from 'svelte';
@@ -100,6 +101,7 @@
 <Lightbox />
 
 <Sidebar.Provider>
+	<CloseSidebarOnNavigate />
 	<Sidebar.Root collapsible="icon">
 		<Sidebar.Header class="h-14 justify-center border-b border-sidebar-border px-2">
 			<a
