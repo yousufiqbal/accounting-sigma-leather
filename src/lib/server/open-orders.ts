@@ -13,7 +13,8 @@ import { estimatedFee } from './assumptions.js';
 
 export type OpenOrder = Awaited<ReturnType<typeof openOrders>>['orders'][number];
 
-export async function openOrders() {
+/** All open orders, or only those among `ids` (e.g. orders placed in a date range). */
+export async function openOrders(filter: { ids?: string[] } = {}) {
 	const rows = (await db.all(sql`
 		select o.id, o.name, o.created_at as createdAt, o.fulfillment_status as fulfillmentStatus,
 			o.fulfillment_tracking as tracking, o.is_prepaid as isPrepaid,
@@ -29,6 +30,7 @@ export async function openOrders() {
 		where o.cancelled_at is null and o.test = 0 and o.total_paisa > 0
 			and not exists (select 1 from shipments s where s.order_id = o.id
 				and s.status in ('delivered', 'returned') and s.match_status != 'excluded')
+			${filter.ids ? sql`and o.id in (select value from json_each(${JSON.stringify(filter.ids)}))` : sql``}
 		order by o.created_at desc`)) as {
 		id: string;
 		name: string;

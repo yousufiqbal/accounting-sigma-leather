@@ -2,6 +2,7 @@
 	import { formAction } from '#lib/form-action.js';
 	import { enhance } from '$app/forms';
 	import Lock from '@lucide/svelte/icons/lock';
+	import Receipt from '@lucide/svelte/icons/receipt-text';
 	import LockOpen from '@lucide/svelte/icons/lock-open';
 	import Info from '@lucide/svelte/icons/info';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -198,20 +199,23 @@
 				Sales count in the month the parcel was delivered.
 			</p>
 		</div>
-		{#if !data.period}
-			<form
-				method="POST"
-				action={formAction(p.status === 'locked' ? 'unlock' : 'lock')}
-				use:enhance
-			>
-				<input type="hidden" name="month" value={p.month} />
-				{#if p.status === 'locked'}
-					<Button type="submit" variant="outline"><LockOpen /> Unlock month</Button>
-				{:else}
-					<Button type="submit" variant="outline"><Lock /> Lock month</Button>
-				{/if}
-			</form>
-		{/if}
+		<div class="flex flex-wrap gap-2">
+			<Button variant="outline" href="/reports/orders"><Receipt /> Order profit by date</Button>
+			{#if !data.period}
+				<form
+					method="POST"
+					action={formAction(p.status === 'locked' ? 'unlock' : 'lock')}
+					use:enhance
+				>
+					<input type="hidden" name="month" value={p.month} />
+					{#if p.status === 'locked'}
+						<Button type="submit" variant="outline"><LockOpen /> Unlock month</Button>
+					{:else}
+						<Button type="submit" variant="outline"><Lock /> Lock month</Button>
+					{/if}
+				</form>
+			{/if}
+		</div>
 	</div>
 
 	<div class="flex flex-wrap items-center gap-1" data-sveltekit-noscroll>
