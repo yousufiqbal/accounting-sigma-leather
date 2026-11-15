@@ -410,3 +410,44 @@ export const loginAttempts = sqliteTable('login_attempts', {
 	count: integer('count').notNull().default(0),
 	windowStart: integer('window_start').notNull() // epoch ms
 });
+
+// ─── Restock ───────────────────────────────────────────────────────────────────
+// A session is one pass through the catalogue (start → enter quantities product by product or in
+// a table → finish), then a restock list grouped by air / sea shipment.
+
+export const restockSessions = sqliteTable('restock_sessions', {
+	id: id(),
+	startedAt: text('started_at')
+		.notNull()
+		.$defaultFn(() => new Date().toISOString()),
+	completedAt: text('completed_at'),
+	totalProducts: integer('total_products').notNull().default(0)
+});
+
+export const restockItems = sqliteTable(
+	'restock_items',
+	{
+		id: id(),
+		sessionId: text('session_id').notNull(),
+		productId: text('product_id').notNull(),
+		variantId: text('variant_id').notNull(),
+		productTitle: text('product_title').notNull(),
+		variantTitle: text('variant_title'),
+		sku: text('sku'),
+		productImageUrl: text('product_image_url'),
+		variantImageUrl: text('variant_image_url'),
+		sales30: integer('sales_30').notNull().default(0),
+		sales60: integer('sales_60').notNull().default(0),
+		sales90: integer('sales_90').notNull().default(0),
+		/** Snapshot at session start, for the record — views recompute from current stock. */
+		currentStock: integer('current_stock').notNull().default(0),
+		recAir: integer('rec_air').notNull().default(0),
+		recSea: integer('rec_sea').notNull().default(0),
+		actualRestock: integer('actual_restock'),
+		restockMode: text('restock_mode', { enum: ['air', 'sea'] }),
+		position: integer('position').notNull().default(0),
+		variantPosition: integer('variant_position').notNull().default(0),
+		orderedAt: text('ordered_at')
+	},
+	(t) => [index('restock_items_session_idx').on(t.sessionId, t.position)]
+);

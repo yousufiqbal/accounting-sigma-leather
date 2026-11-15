@@ -5,6 +5,7 @@ import Truck from '@lucide/svelte/icons/truck';
 import Users from '@lucide/svelte/icons/users';
 import Boxes from '@lucide/svelte/icons/boxes';
 import PackagePlus from '@lucide/svelte/icons/package-plus';
+import PackageSearch from '@lucide/svelte/icons/package-search';
 import Receipt from '@lucide/svelte/icons/receipt';
 import Tag from '@lucide/svelte/icons/tag';
 import Settings from '@lucide/svelte/icons/settings';
@@ -18,6 +19,7 @@ export const nav = [
 	{ href: '/couriers', label: 'Couriers', icon: Truck, badge: 'couriers' },
 	{ href: '/inventory', label: 'Inventory', icon: Boxes, badge: 'inventory' },
 	{ href: '/pricing', label: 'Pricing', icon: Tag },
+	{ href: '/restock', label: 'Restock', icon: PackageSearch },
 	{ href: '/purchases', label: 'Purchases', icon: PackagePlus },
 	{ href: '/expenses', label: 'Expenses', icon: Receipt }
 ] as const;
