@@ -30,6 +30,16 @@
 			ddpOverride: boolean;
 			total: number | null;
 		};
+		bundle:
+			| null
+			| {
+					id: string;
+					title: string;
+					variant: string | null;
+					imageUrl: string | null;
+					qty: number;
+					cost: number;
+			  }[];
 		purchases: { ref: string; id: string; landedOn: string; qty: number; landed: number }[];
 		history: { at: string; oldCost: number; newCost: number; reason: string }[];
 	};
@@ -75,7 +85,8 @@
 					<div class="min-w-0">
 						<div class="font-medium">{d.title}</div>
 						<div class="text-xs text-muted-foreground">
-							{d.variant ?? ''}{d.variant && d.sku ? ' · ' : ''}{d.sku ?? ''} · {d.onHand ?? 0} on hand
+							{d.variant ?? ''}{d.variant && d.sku ? ' · ' : ''}{d.sku ?? ''}{#if !d.bundle}
+								· {d.onHand ?? 0} on hand{/if}
 						</div>
 					</div>
 				</div>
@@ -86,6 +97,48 @@
 						<StatusBadge tone={SOURCE[d.source].tone} label={SOURCE[d.source].label} />
 					</span>
 				</div>
+
+				{#if d.bundle}
+					{@const missing = d.bundle.some((c) => c.cost <= 0)}
+					<div class="grid gap-1.5">
+						<p class="font-medium">
+							Bundle <span class="font-normal text-muted-foreground"
+								>(cost = sum of its items — change an item's cost to change this)</span
+							>
+						</p>
+						<div class="grid gap-1 rounded-lg border p-2">
+							{#each d.bundle as c (c.id)}
+								<button
+									type="button"
+									class="flex items-center gap-2 rounded px-1 py-1 text-left hover:bg-accent"
+									title="See this item's cost"
+									onclick={() => show(c.id)}
+								>
+									<Thumb src={c.imageUrl} alt={`${c.title} ${c.variant ?? ''}`} size={28} />
+									<span class="min-w-0 flex-1">
+										<span class="line-clamp-1">{c.title}</span>
+										{#if c.variant}<span class="text-xs text-muted-foreground">{c.variant}</span
+											>{/if}
+									</span>
+									<span class={['num whitespace-nowrap', c.cost <= 0 && 'text-danger']}
+										>{c.qty} × {c.cost > 0 ? formatRs(c.cost, { decimals: true }) : 'no cost'}</span
+									>
+								</button>
+							{/each}
+							<div class="flex justify-between border-t px-1 pt-1 font-medium">
+								<span>Bundle cost</span>
+								<span class="num"
+									>{missing
+										? '— (an item has no cost)'
+										: formatRs(
+												d.bundle.reduce((t, c) => t + c.qty * c.cost, 0),
+												{ decimals: true }
+											)}</span
+								>
+							</div>
+						</div>
+					</div>
+				{/if}
 
 				{#if d.purchases.length}
 					<div class="grid gap-1.5">
@@ -125,9 +178,9 @@
 							</div>
 							<div class="flex justify-between gap-3">
 								<span class="text-muted-foreground">
-									DDP: {#if e.ddpOverride}{e.ddp === 0
-											? 'local, none'
-											: 'set by hand'}{:else if e.currency === 'PKR'}local, none{:else}{e.weightG ??
+									Transport: {#if e.ddpOverride}{e.ddp === 0
+											? 'none (local)'
+											: 'set by hand'}{:else if e.currency === 'PKR'}none (local){:else}{e.weightG ??
 											0} g × Rs {(e.ddpPerKg / 100).toLocaleString('en-PK')}/kg{/if}
 								</span>
 								<span class="num">{formatRs(e.ddp, { decimals: true })}</span>
@@ -143,11 +196,11 @@
 					<p class="text-muted-foreground">
 						Using the Shopify “cost per item” ({formatRs(d.shopifyCost ?? 0)}), marked as correct.
 					</p>
-				{:else if d.source === 'none'}
+				{:else if d.source === 'none' && !d.bundle}
 					<p class="text-danger">No cost yet — add the buying price on Opening costs.</p>
 				{/if}
 
-				{#if d.source !== 'batch'}
+				{#if d.source !== 'batch' && !d.bundle}
 					<Button
 						variant="outline"
 						href="/inventory/opening?view=all&q={encodeURIComponent(d.sku ?? d.title)}"

@@ -38,7 +38,7 @@ export const actions: Actions = {
 			ddp = toPaisa(String(f.get('ddp') ?? '0'));
 			if (!Number.isFinite(fx) || fx <= 0) throw new Error();
 		} catch {
-			return fail(400, { error: 'Exchange rate and DDP rate must be numbers.' });
+			return fail(400, { error: 'Exchange rate and transport rate must be numbers.' });
 		}
 		const [b] = await db
 			.insert(schema.importBatches)

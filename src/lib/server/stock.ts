@@ -60,34 +60,54 @@ type Cost = typeof schema.batchCosts.$inferSelect;
 /**
  * Landed cost per piece:
  *   goods  = unit price × FX (PKR: as-is)
- *   DDP    = shipment DDP (billed box weight × rate/kg) split by
- *            item weight share (unit weight × qty); before the box weight is known it is
- *            estimated as unit weight × rate and the purchase is "DDP pending"
- *   extra  = other shipment costs, also split by weight (by value if no item has a weight)
+ *   transport = either per kg (billed box weight × rate/kg — the China forwarder) or one fixed
+ *               bill (e.g. local carriage); before the box weight is known, per-kg transport is
+ *               estimated as unit weight × rate and the purchase is "transport pending"
+ *   extra     = other shipment costs
+ * Transport and extras are split by weight (a fixed bill can choose goods value instead). When
+ * not every item has a weight, by value — so no item ends up without a share; no value: by pieces.
  */
 export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 	const fx = batch.currency === 'PKR' ? 10_000 : batch.fxRateX10000;
 	const itemWeight = items.reduce((t, it) => t + it.unitWeightG * it.qty, 0);
-	const goodsTotal = items.reduce((t, it) => t + goodsCost(it.unitPriceForeignMinor, batch.currency, fx) * it.qty, 0);
+	const goodsTotal = items.reduce(
+		(t, it) => t + goodsCost(it.unitPriceForeignMinor, batch.currency, fx) * it.qty,
+		0
+	);
 	const billed = batch.billedWeightG ?? null;
-	const ddpTotal = billed !== null ? Math.round((billed * batch.ddpRatePerKg) / 1000) : null;
-	const ddpPending = ddpTotal === null && batch.ddpRatePerKg > 0;
+	const fixed = batch.ddpTotal !== null;
+	const ddpTotal = fixed
+		? batch.ddpTotal!
+		: billed !== null
+			? Math.round((billed * batch.ddpRatePerKg) / 1000)
+			: null;
+	const ddpPending = !fixed && ddpTotal === null && batch.ddpRatePerKg > 0;
 	const extraTotal = costs.reduce((t, c) => t + c.amount, 0);
+
+	const units = items.reduce((t, it) => t + it.qty, 0);
+	/** What the purchase asks for, and what is actually used (weight needs every item's weight). */
+	const splitChosen: 'weight' | 'value' =
+		fixed && batch.transportSplit === 'value' ? 'value' : 'weight';
+	const allWeighed = items.length > 0 && items.every((it) => it.unitWeightG > 0);
+	const split: 'weight' | 'value' | 'pieces' =
+		splitChosen === 'weight' && allWeighed ? 'weight' : goodsTotal > 0 ? 'value' : 'pieces';
+	/** One piece's share (0–1) of a shipment-wide cost. */
+	const share = (it: Item, goods: number) =>
+		split === 'weight'
+			? it.unitWeightG / itemWeight
+			: split === 'value'
+				? goods / goodsTotal
+				: units > 0
+					? 1 / units
+					: 0;
 
 	const out = items.map((it) => {
 		const goods = goodsCost(it.unitPriceForeignMinor, batch.currency, fx);
 		const ddp =
 			ddpTotal === null
 				? ddpCost(it.unitWeightG, batch.ddpRatePerKg) // estimate until the box is weighed
-				: itemWeight > 0
-					? Math.round((ddpTotal * it.unitWeightG) / itemWeight)
-					: 0;
-		const extra =
-			itemWeight > 0
-				? Math.round((extraTotal * it.unitWeightG) / itemWeight)
-				: goodsTotal > 0
-					? Math.round((extraTotal * goods) / goodsTotal)
-					: 0;
+				: Math.round(ddpTotal * share(it, goods));
+		const extra = Math.round(extraTotal * share(it, goods));
 		return { ...it, goods, ddp, extra, landed: goods + ddp + extra };
 	});
 	return {
@@ -104,6 +124,11 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 			billedWeightG: billed,
 			ddpTotal,
 			ddpPending,
+			/** One fixed transport bill instead of weight × rate. */
+			fixed,
+			/** How transport and extras are shared between items (chosen vs used). */
+			splitChosen,
+			split,
 			/** Box weight vs item weights: cartons, packing, rounding. */
 			overhead: billed !== null && itemWeight > 0 ? billed / itemWeight - 1 : null,
 			itemsWithoutWeight: out.filter((l) => l.unitWeightG <= 0).length
@@ -135,7 +160,10 @@ async function liveOnHand(inventoryItemIds: string[], locationId: string) {
 	for (let i = 0; i < inventoryItemIds.length; i += 100) {
 		const ids = inventoryItemIds.slice(i, i + 100).map((x) => `gid://shopify/InventoryItem/${x}`);
 		const d = await shopifyGql<{
-			nodes: ({ id: string; inventoryLevel: { quantities: { quantity: number }[] } | null } | null)[];
+			nodes: ({
+				id: string;
+				inventoryLevel: { quantities: { quantity: number }[] } | null;
+			} | null)[];
 		}>(
 			`query($ids: [ID!]!, $loc: ID!) { nodes(ids: $ids) { ... on InventoryItem {
 				id inventoryLevel(locationId: $loc) { quantities(names: ["on_hand"]) { quantity } }
@@ -177,7 +205,8 @@ async function pushReceipt(
 			}
 		);
 		const errs = d.inventoryAdjustQuantities.userErrors;
-		if (errs.length) throw new Error(`Shopify stock update: ${errs.map((e) => e.message).join('; ')}`);
+		if (errs.length)
+			throw new Error(`Shopify stock update: ${errs.map((e) => e.message).join('; ')}`);
 	}
 }
 
@@ -210,19 +239,29 @@ export async function landBatch(id: string, landedOn: string) {
 	if (b.batch.status === 'landed') throw new Error('Already landed.');
 	const retry = b.batch.status === 'landing';
 	if (!b.lines.length) throw new Error('Add items first.');
-	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000) throw new Error('Enter the exchange rate.');
+	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000)
+		throw new Error('Enter the exchange rate.');
 	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
-	if (b.shipment.ddpPending) throw new Error('DDP pending — enter the billed box weight first.');
-	if (b.shipment.ddpTotal && b.shipment.itemsWithoutWeight)
-		throw new Error(`${b.shipment.itemsWithoutWeight} items have no weight, so they would get no DDP share. Enter their weights.`);
+	if (b.shipment.ddpPending)
+		throw new Error('Transport pending — enter the billed box weight first.');
+	if (!b.shipment.fixed && b.shipment.ddpTotal && b.shipment.itemsWithoutWeight)
+		throw new Error(
+			`${b.shipment.itemsWithoutWeight} items have no weight, so they would get no transport share. Enter their weights.`
+		);
 
 	const vars = await db
 		.select()
 		.from(v)
-		.where(inArray(v.id, b.lines.map((l) => l.variantId)));
+		.where(
+			inArray(
+				v.id,
+				b.lines.map((l) => l.variantId)
+			)
+		);
 	const byId = new Map(vars.map((x) => [x.id, x]));
 	const missing = b.lines.filter((l) => !byId.get(l.variantId)?.inventoryItemId);
-	if (missing.length) throw new Error(`${missing.length} items are not linked to Shopify — run a product sync.`);
+	if (missing.length)
+		throw new Error(`${missing.length} items are not linked to Shopify — run a product sync.`);
 
 	const { getSetting, setSetting } = await import('./settings.js');
 	const snapKey = `landing:${id}`;
@@ -231,9 +270,15 @@ export async function landBatch(id: string, landedOn: string) {
 		const claimed = await db
 			.update(schema.importBatches)
 			.set({ status: 'landing' })
-			.where(and(eq(schema.importBatches.id, id), inArray(schema.importBatches.status, ['draft', 'paid'])))
+			.where(
+				and(
+					eq(schema.importBatches.id, id),
+					inArray(schema.importBatches.status, ['draft', 'paid'])
+				)
+			)
 			.returning({ id: schema.importBatches.id });
-		if (!claimed.length) throw new Error('This purchase is already being added — refresh the page.');
+		if (!claimed.length)
+			throw new Error('This purchase is already being added — refresh the page.');
 	}
 	const locationId = await primaryLocation();
 	// On-hand BEFORE this receipt. Saved on the first attempt; a retry must not re-read it
@@ -241,11 +286,19 @@ export async function landBatch(id: string, landedOn: string) {
 	let snap = await getSetting<Record<string, number>>(snapKey);
 	if (!snap) {
 		try {
-			snap = Object.fromEntries(await liveOnHand(vars.map((x) => x.inventoryItemId!), locationId));
+			snap = Object.fromEntries(
+				await liveOnHand(
+					vars.map((x) => x.inventoryItemId!),
+					locationId
+				)
+			);
 			await setSetting(snapKey, snap);
 		} catch (e) {
 			// Nothing pushed yet: release the claim so the user can simply try again.
-			await db.update(schema.importBatches).set({ status: b.batch.paidOn ? 'paid' : 'draft' }).where(eq(schema.importBatches.id, id));
+			await db
+				.update(schema.importBatches)
+				.set({ status: b.batch.paidOn ? 'paid' : 'draft' })
+				.where(eq(schema.importBatches.id, id));
 			throw e;
 		}
 	}
@@ -391,12 +444,7 @@ export async function classifyStockChanges(ids: string[], reason: VarianceReason
 	const r = await db
 		.update(schema.stockMovements)
 		.set({ reason })
-		.where(
-			and(
-				inArray(schema.stockMovements.id, ids),
-				eq(schema.stockMovements.type, 'variance')
-			)
-		)
+		.where(and(inArray(schema.stockMovements.id, ids), eq(schema.stockMovements.type, 'variance')))
 		.returning({ id: schema.stockMovements.id });
 	return r.length;
 }

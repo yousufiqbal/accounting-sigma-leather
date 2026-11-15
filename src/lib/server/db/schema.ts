@@ -104,6 +104,8 @@ export const importBatches = sqliteTable('import_batches', {
 	billedWeightG: integer('billed_weight_g'),
 	/** Invoice DDP total if it differs from weight × rate (paisa). */
 	ddpTotal: integer('ddp_total_paisa'),
+	/** Fixed bill: share it by item weight or by goods value (null = weight). */
+	transportSplit: text('transport_split', { enum: ['weight', 'value'] }),
 	status: text('status', { enum: ['draft', 'paid', 'landing', 'landed'] })
 		.notNull()
 		.default('draft'),

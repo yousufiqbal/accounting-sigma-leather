@@ -18,7 +18,7 @@ const v = schema.variants;
 export const load: PageServerLoad = async ({ url }) => {
 	const view: View = (VIEWS as readonly string[]).includes(url.searchParams.get('view') ?? '')
 		? (url.searchParams.get('view') as View)
-		: 'below';
+		: 'all';
 	const q = url.searchParams.get('q')?.trim().toLowerCase() ?? '';
 
 	const settings = await getPricingSettings();
@@ -40,7 +40,15 @@ export const load: PageServerLoad = async ({ url }) => {
 			price: v.price,
 			cost: v.avgCost,
 			costSource: v.costSource,
-			onHand: v.shopifyOnHand
+			onHand: v.shopifyOnHand,
+			/** Yuan price for recall: last RMB purchase, else the opening-stock estimate (fen). */
+			purchaseYuan: sql<number | null>`(select bi.unit_price_foreign_minor from batch_items bi
+				join import_batches b on b.id = bi.batch_id
+				where bi.variant_id = "variants"."id" and b.currency = 'RMB' and bi.unit_price_foreign_minor > 0
+				order by coalesce(b.paid_on, b.created_at) desc, b.created_at desc limit 1)`,
+			openingYuan: sql<
+				number | null
+			>`case when ${v.estCurrency} = 'RMB' and ${v.estCnPriceMinor} > 0 then ${v.estCnPriceMinor} end`
 		})
 		.from(v)
 		.where(eq(v.status, 'ACTIVE'))
@@ -69,8 +77,11 @@ export const load: PageServerLoad = async ({ url }) => {
 	const rows = variants.map((x) => {
 		const s = salesBy.get(x.id);
 		const profit = x.cost > 0 ? profitPerUnit(x.price, x.cost) : null;
+		const { purchaseYuan, openingYuan, ...rest } = x;
 		return {
-			...x,
+			...rest,
+			yuan: x.isBundle ? null : (purchaseYuan ?? openingYuan),
+			yuanFrom: purchaseYuan !== null ? ('purchase' as const) : ('opening' as const),
 			sold: s?.sold ?? 0,
 			returned: s?.returned ?? 0,
 			profit,

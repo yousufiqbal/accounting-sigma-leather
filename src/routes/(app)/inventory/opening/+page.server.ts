@@ -296,7 +296,7 @@ export const actions: Actions = {
 				try {
 					ddp = d === '' ? null : Math.abs(toPaisa(d));
 				} catch {
-					problems.push(`row ${i + 2}: DDP "${d}" is not a number`);
+					problems.push(`row ${i + 2}: transport "${d}" is not a number`);
 					continue;
 				}
 			}

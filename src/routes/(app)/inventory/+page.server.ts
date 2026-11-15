@@ -25,7 +25,7 @@ const VIEW_WHERE: Record<View, SQL | undefined> = {
 export const load: PageServerLoad = async ({ url }) => {
 	const view: View = (VIEWS as readonly string[]).includes(url.searchParams.get('view') ?? '')
 		? (url.searchParams.get('view') as View)
-		: 'needs';
+		: 'all';
 	const q = url.searchParams.get('q')?.trim() ?? '';
 	const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
 
@@ -60,7 +60,11 @@ export const load: PageServerLoad = async ({ url }) => {
 			ddp: v.estDdp,
 			estCost: v.estCost,
 			avgCost: v.avgCost,
-			costSource: v.costSource
+			costSource: v.costSource,
+			/** Purchased, not arrived yet (drafts don't count). */
+			incoming: sql<number>`coalesce((select sum(bi.qty) from batch_items bi
+				join import_batches b on b.id = bi.batch_id
+				where bi.variant_id = "variants"."id" and b.status in ('paid', 'landing')), 0)`
 		})
 		.from(v)
 		.where(where)

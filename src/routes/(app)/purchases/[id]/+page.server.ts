@@ -134,7 +134,7 @@ export const actions: Actions = {
 		return { saved: 'Saved.' };
 	},
 
-	/** Shipment DDP: billed box weight (kg) × rate. */
+	/** Shipment transport: billed box weight (kg) × rate, or one fixed bill. */
 	shipment: async ({ params, request }) => {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		const f = await request.formData();
@@ -147,6 +147,23 @@ export const actions: Actions = {
 			if (!Number.isFinite(n) || n < 0) throw new Error(k);
 			return n;
 		};
+		if (f.get('mode') === 'fixed') {
+			let bill: number | null;
+			try {
+				bill = num('bill');
+			} catch {
+				return fail(400, { error: 'The bill must be a number.' });
+			}
+			if (bill === null) return fail(400, { error: 'Enter the transport bill.' });
+			await db
+				.update(schema.importBatches)
+				.set({
+					ddpTotal: Math.round(bill * 100),
+					transportSplit: f.get('split') === 'value' ? 'value' : 'weight'
+				})
+				.where(eq(schema.importBatches.id, params.id));
+			return { saved: 'Transport bill saved and split across items.' };
+		}
 		let kg: number | null, rate: number | null;
 		try {
 			kg = num('billedKg');
@@ -164,7 +181,9 @@ export const actions: Actions = {
 			.where(eq(schema.importBatches.id, params.id));
 		return {
 			saved:
-				kg === null ? 'Saved — DDP still pending.' : 'Shipment DDP saved and split across items.'
+				kg === null
+					? 'Saved — transport still pending.'
+					: 'Shipment transport saved and split across items.'
 		};
 	},
 
@@ -256,35 +275,6 @@ export const actions: Actions = {
 		return { saved: 'Item removed.' };
 	},
 
-	addCost: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
-		const f = await request.formData();
-		let amount: number;
-		try {
-			amount = Math.abs(toPaisa(String(f.get('amount') ?? '')));
-		} catch {
-			return fail(400, { error: 'Amount must be a number.' });
-		}
-		if (!amount) return fail(400, { error: 'Enter an amount.' });
-		await db.insert(schema.batchCosts).values({
-			batchId: params.id,
-			type: f.get('type') === 'local_cartage' ? 'local_cartage' : 'other',
-			amount,
-			alloc: 'value',
-			note: String(f.get('note') ?? '').trim() || null
-		});
-		return { saved: 'Cost added.' };
-	},
-
-	removeCost: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
-		const id = String((await request.formData()).get('costId'));
-		await db
-			.delete(schema.batchCosts)
-			.where(and(eq(schema.batchCosts.id, id), eq(schema.batchCosts.batchId, params.id)));
-		return { saved: 'Cost removed.' };
-	},
-
 	paid: async ({ params, request }) => {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		const date = String((await request.formData()).get('date') ?? '');
@@ -293,12 +283,27 @@ export const actions: Actions = {
 			.update(schema.importBatches)
 			.set({ status: 'paid', paidOn: date })
 			.where(eq(schema.importBatches.id, params.id));
-		return { saved: 'Marked paid — counted as stock on the way.' };
+		return { saved: 'Marked purchased — counted as incoming stock.' };
+	},
+
+	/** Purchased by mistake: back to draft (no stock effect). */
+	draft: async ({ params }) => {
+		if (!(await editable(params.id))) return fail(400, LANDED);
+		await db
+			.update(schema.importBatches)
+			.set({ status: 'draft', paidOn: null })
+			.where(eq(schema.importBatches.id, params.id));
+		return { saved: 'Back to draft — no longer counted as incoming.' };
 	},
 
 	land: async ({ params, request }) => {
 		const date = String((await request.formData()).get('date') ?? '');
 		if (!isDate(date)) return fail(400, { error: 'Pick the date the goods arrived.' });
+		const cur = await db.query.importBatches.findFirst({
+			where: eq(schema.importBatches.id, params.id),
+			columns: { status: true }
+		});
+		if (cur?.status === 'draft') return fail(400, { error: 'Mark it purchased first.' });
 		try {
 			const r = await landBatch(params.id, date);
 			return {

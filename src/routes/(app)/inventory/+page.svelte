@@ -51,10 +51,10 @@
 		return `?${p}`;
 	}
 	const views = $derived([
+		{ id: 'all', label: `All (${data.counts.all})` },
 		{ id: 'needs', label: `In stock, no cost (${data.counts.needs})` },
 		{ id: 'noweight', label: `No weight (${data.counts.noweight})` },
-		{ id: 'estimated', label: `Estimated (${data.counts.estimated})` },
-		{ id: 'all', label: `All (${data.counts.all})` }
+		{ id: 'estimated', label: `Estimated (${data.counts.estimated})` }
 	]);
 	const s = $derived(data.summary);
 	const openingHref = $derived(`/inventory/opening?m=${page.url.searchParams.get('m') ?? ''}`);
@@ -109,8 +109,8 @@
 			{formatRs(Number(data.elsewhere.withCourier.value))}
 		</Stat>
 		<Stat
-			label="On the way (paid purchases)"
-			hint="{data.elsewhere.onTheWay.units} units in paid purchases"
+			label="On the way (purchased)"
+			hint="{data.elsewhere.onTheWay.units} units purchased, not arrived"
 		>
 			{formatRs(data.elsewhere.onTheWay.value)}
 		</Stat>
@@ -177,6 +177,7 @@
 					<Table.Row>
 						<Table.Head class="pl-6">Product</Table.Head>
 						<Table.Head class="text-right">On hand</Table.Head>
+						<Table.Head class="text-right" title="Purchased, not arrived yet">Incoming</Table.Head>
 						<Table.Head class="text-right">Weight</Table.Head>
 						<Table.Head class="text-right">Cost</Table.Head>
 						<Table.Head class="pr-6 text-right">Stock value</Table.Head>
@@ -186,7 +187,7 @@
 					{#each data.rows as r, i (r.id)}
 						{#if groups[i].first && groups[i].grouped}
 							<Table.Row class="bg-muted/40 hover:bg-muted/40">
-								<Table.Cell colspan={5} class="py-2 pr-6 pl-6">
+								<Table.Cell colspan={6} class="py-2 pr-6 pl-6">
 									<div class="flex items-center gap-3">
 										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
 											>{r.productTitle}</span
@@ -219,6 +220,11 @@
 								</div>
 							</Table.Cell>
 							<Table.Cell class="num text-right">{r.onHand ?? 0}</Table.Cell>
+							<Table.Cell class="num text-right"
+								>{#if r.incoming}<span class="text-info">{r.incoming}</span>{:else}<span
+										class="text-muted-foreground">—</span
+									>{/if}</Table.Cell
+							>
 							<Table.Cell class="num text-right">
 								{#if r.weightG}{r.weightG} g{:else}<span class="text-danger">—</span>{/if}
 							</Table.Cell>
@@ -244,7 +250,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row
-							><Table.Cell colspan={5} class="py-10 text-center text-muted-foreground"
+							><Table.Cell colspan={6} class="py-10 text-center text-muted-foreground"
 								>Nothing here.</Table.Cell
 							></Table.Row
 						>

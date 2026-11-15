@@ -18,6 +18,7 @@
 	import Stat from '#lib/components/app/stat.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
 	import { formatPct, formatRs } from '#lib/money.js';
+	import CostSheet from '#lib/components/app/cost-sheet.svelte';
 	import type { PageProps } from './$types';
 
 	let costsOpen = $state(false);
@@ -191,12 +192,13 @@
 		return `?${p}`;
 	}
 	const views = $derived([
+		{ id: 'all', label: `All (${data.counts.all})` },
 		{ id: 'below', label: `Below target (${data.counts.below})` },
 		{ id: 'losing', label: `Losing money (${data.counts.losing})` },
 		{ id: 'nocost', label: `No cost (${data.counts.nocost})` },
-		{ id: 'best', label: `Best sellers (${data.counts.best})` },
-		{ id: 'all', label: `All (${data.counts.all})` }
+		{ id: 'best', label: `Best sellers (${data.counts.best})` }
 	]);
+	let costSheet = $state<CostSheet>();
 </script>
 
 <div class="grid gap-6 pb-24">
@@ -250,7 +252,7 @@
 			</div>
 			{#if data.view === 'nocost'}
 				<Card.Description>
-					Add costs on the <a href="/inventory" class="underline">Inventory</a> page first.
+					Add costs on the <a href="/inventory?view=needs" class="underline">Inventory</a> page first.
 				</Card.Description>
 			{/if}
 		</Card.Header>
@@ -259,6 +261,10 @@
 				<Table.Header>
 					<Table.Row>
 						<Table.Head class="pl-6">Product</Table.Head>
+						<Table.Head
+							class="text-right"
+							title="Last purchase price in yuan, else the opening-stock estimate">¥</Table.Head
+						>
 						<Table.Head class="text-right">Cost</Table.Head>
 						<Table.Head class="text-right">Sold {data.windowDays}d</Table.Head>
 						<Table.Head class="text-right">Price</Table.Head>
@@ -273,7 +279,7 @@
 						{@const npProfit = np !== null && r.cost > 0 ? profitAt(np, r.cost) : null}
 						{#if groups[i].first && groups[i].grouped}
 							<Table.Row class="bg-muted/40 hover:bg-muted/40">
-								<Table.Cell colspan={7} class="py-2 pr-6 pl-6">
+								<Table.Cell colspan={8} class="py-2 pr-6 pl-6">
 									<div class="flex items-center gap-3">
 										<span class="max-w-md min-w-0 truncate font-medium" title={r.productTitle}
 											>{r.productTitle}</span
@@ -327,12 +333,30 @@
 									</div>
 								</div>
 							</Table.Cell>
+							<Table.Cell
+								class="num text-right text-muted-foreground"
+								title={r.yuan === null
+									? undefined
+									: r.yuanFrom === 'purchase'
+										? 'Last purchase'
+										: 'Opening stock estimate'}
+								>{r.yuan === null
+									? '—'
+									: `¥${(r.yuan / 100).toLocaleString('en', { maximumFractionDigits: 2 })}`}</Table.Cell
+							>
 							<Table.Cell class="text-right">
 								{#if r.cost > 0}
-									<Money paisa={r.cost} />
-									{#if r.costSource !== 'batch'}<div class="text-xs text-muted-foreground">
-											estimated
-										</div>{/if}
+									<button
+										type="button"
+										class="rounded px-1.5 py-0.5 text-right hover:bg-accent"
+										title="How is this cost built?"
+										onclick={() => costSheet?.show(r.id)}
+									>
+										<Money paisa={r.cost} />
+										{#if r.costSource !== 'batch'}<div class="text-xs text-muted-foreground">
+												estimated
+											</div>{/if}
+									</button>
 								{:else}<a
 										href="/inventory/opening?view=all&q={encodeURIComponent(
 											r.sku ?? r.productTitle
@@ -396,7 +420,7 @@
 						</Table.Row>
 					{:else}
 						<Table.Row
-							><Table.Cell colspan={7} class="py-10 text-center text-muted-foreground"
+							><Table.Cell colspan={8} class="py-10 text-center text-muted-foreground"
 								>Nothing here.</Table.Cell
 							></Table.Row
 						>
@@ -407,6 +431,8 @@
 		<Card.Footer class="text-sm text-muted-foreground">{data.totalRows} variants</Card.Footer>
 	</Card.Root>
 </div>
+
+<CostSheet bind:this={costSheet} />
 
 {#if changes.length}
 	<div

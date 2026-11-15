@@ -10,6 +10,7 @@
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
+	import * as Dialog from '#lib/components/ui/dialog/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
@@ -37,17 +38,54 @@
 	let showPaste = $state(false);
 	let pickedVariant = $state('');
 
-	/** Shipment DDP inputs: saved values unless the user is editing. */
+	/** Shipment transport inputs: saved values unless the user is editing. */
+	type ShipMode = 'perkg' | 'fixed';
 	const shipSaved = $derived({
+		mode: (data.shipment.fixed ? 'fixed' : 'perkg') as ShipMode,
 		kg: data.shipment.billedWeightG !== null ? String(data.shipment.billedWeightG / 1000) : '',
-		rate: String(b.ddpRatePerKg / 100)
+		rate: String(b.ddpRatePerKg / 100),
+		bill:
+			data.shipment.fixed && data.shipment.ddpTotal !== null
+				? String(data.shipment.ddpTotal / 100)
+				: '',
+		split: data.shipment.splitChosen
 	});
-	let shipEdit = $state<{ kg: string; rate: string } | null>(null);
+	let shipEdit = $state<{
+		mode: ShipMode;
+		kg: string;
+		rate: string;
+		bill: string;
+		split: 'weight' | 'value';
+	} | null>(null);
 	const ship = $derived(shipEdit ?? shipSaved);
 	const num = (x: string) => (x.trim() === '' ? null : Number(x.replace(/,/g, '')));
+	/** Per kg: live bill total while typing (paisa). */
+	/** What the transport card shows, live from the inputs (saved or being typed). */
+	const live = $derived.by(() => {
+		const allWeighed = data.lines.length > 0 && data.shipment.itemsWithoutWeight === 0;
+		const wantValue = ship.mode === 'fixed' && ship.split === 'value';
+		let total: number | null;
+		let overhead: number | null = null;
+		if (ship.mode === 'fixed') total = Math.round((num(ship.bill) ?? 0) * 100);
+		else {
+			const kg = num(ship.kg);
+			const rate = num(ship.rate) ?? 0;
+			total = rate === 0 ? 0 : kg === null ? null : Math.round(kg * rate * 100);
+			if (kg !== null && data.totals.weightG > 0) overhead = (kg * 1000) / data.totals.weightG - 1;
+		}
+		return {
+			total: total !== null && Number.isFinite(total) ? total : null,
+			split: wantValue || !allWeighed ? 'value' : 'weight',
+			fallback: !wantValue && !allWeighed && !!total,
+			overhead
+		};
+	});
 	const shipDirty = $derived(
 		shipEdit !== null &&
-			(num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate))
+			(shipEdit.mode !== shipSaved.mode ||
+				(shipEdit.mode === 'fixed'
+					? num(shipEdit.bill) !== num(shipSaved.bill) || shipEdit.split !== shipSaved.split
+					: num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate)))
 	);
 	const dirty = $derived(Object.keys(edits).length);
 
@@ -67,9 +105,9 @@
 
 	const STATUS = {
 		draft: { tone: 'muted', label: 'draft' },
-		paid: { tone: 'info', label: 'paid · on the way' },
+		paid: { tone: 'info', label: 'purchased · incoming' },
 		landing: { tone: 'warning', label: 'adding to stock…' },
-		landed: { tone: 'success', label: 'landed' }
+		landed: { tone: 'success', label: 'arrived' }
 	} as const;
 
 	const act = (name: string, after?: () => void) => () => {
@@ -86,6 +124,25 @@
 			if (result.type === 'success') after?.();
 		};
 	};
+
+	/** "Mark arrived" review: what goes into Shopify, confirmed by typing the unit count. */
+	let arriveOpen = $state(false);
+	let arriveTyped = $state('');
+	let arriveConfirmed = false;
+	let arriveForm = $state<HTMLFormElement>();
+	let arriveDate = $state(today);
+	const arrivePlan = $derived(
+		data.lines.map((l) => {
+			const have = Math.max(0, l.variant?.onHand ?? 0);
+			const old = l.variant && l.variant.avgCost > 0 ? l.variant.avgCost : null;
+			const newAvg = Math.round(
+				(have * (old ?? l.landed) + l.qty * l.landed) / (have + l.qty || 1)
+			);
+			const change = old ? (newAvg - old) / old : null;
+			return { l, have, old, newAvg, big: change !== null && Math.abs(change) > 0.3 };
+		})
+	);
+	const arriveOk = $derived(arriveTyped.trim() === String(data.totals.units));
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -101,16 +158,17 @@
 				<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
 				{#if data.shipment.ddpPending && !locked}<StatusBadge
 						tone="warning"
-						label="DDP pending"
+						label="Transport pending"
 					/>{/if}
 			</h1>
 			<p class="text-sm text-muted-foreground">
 				{b.supplier ?? 'No supplier'} ·
-				{isRmb ? `¥1 = Rs ${b.fxRateX10000 / 10_000}` : 'Pakistani supplier (Rs)'} · DDP {formatRs(
-					b.ddpRatePerKg
-				)}/kg
-				{#if b.paidOn}· paid {b.paidOn}{/if}
-				{#if b.landedOn}· landed {b.landedOn}{/if}
+				{isRmb ? `¥1 = Rs ${b.fxRateX10000 / 10_000}` : 'Pakistani supplier (Rs)'} · Transport {data
+					.shipment.fixed
+					? `${formatRs(data.shipment.ddpTotal ?? 0)} bill`
+					: `${formatRs(b.ddpRatePerKg)}/kg`}
+				{#if b.paidOn}· purchased {b.paidOn}{/if}
+				{#if b.landedOn}· arrived {b.landedOn}{/if}
 			</p>
 		</div>
 		{#if retrying}
@@ -135,37 +193,69 @@
 						use:enhance={act('paid')}
 						class="flex items-end gap-2"
 					>
-						<Input type="date" name="date" value={today} class="h-9 w-40" aria-label="Paid on" />
-						<Button type="submit" variant="outline" disabled={!!busy}>Mark paid</Button>
+						<Input
+							type="date"
+							name="date"
+							value={today}
+							class="h-9 w-40"
+							aria-label="Purchased on"
+						/>
+						<Button type="submit" disabled={!!busy || !data.lines.length}
+							>{busy === 'paid' ? 'Saving…' : 'Mark purchased'}</Button
+						>
+					</form>
+				{:else}
+					<form
+						method="POST"
+						action={formAction('draft')}
+						use:enhance={act('draft')}
+						class="flex items-end"
+					>
+						<Button type="submit" variant="ghost" disabled={!!busy}>Back to draft</Button>
+					</form>
+					<form
+						method="POST"
+						action={formAction('land')}
+						class="flex items-end gap-2"
+						bind:this={arriveForm}
+						use:enhance={async ({ cancel }) => {
+							if (dirty) {
+								cancel();
+								await notice({
+									title: 'Unsaved item changes',
+									description: 'Save or discard your item changes first.'
+								});
+								return;
+							}
+							if (!arriveConfirmed) {
+								cancel();
+								arriveTyped = '';
+								arriveOpen = true;
+								return;
+							}
+							arriveConfirmed = false;
+							arriveOpen = false;
+							return act('land')();
+						}}
+					>
+						<Input
+							type="date"
+							name="date"
+							bind:value={arriveDate}
+							class="h-9 w-40"
+							aria-label="Arrived on"
+						/>
+						<Button
+							type="submit"
+							disabled={!!busy || !data.lines.length || data.shipment.ddpPending}
+							title={data.shipment.ddpPending
+								? 'Enter the billed box weight under Transport first'
+								: undefined}
+						>
+							{busy === 'land' ? 'Adding to stock…' : 'Mark arrived — add to stock'}
+						</Button>
 					</form>
 				{/if}
-				<form
-					method="POST"
-					action={formAction('land')}
-					class="flex items-end gap-2"
-					use:enhance={async ({ cancel }) => {
-						if (dirty) {
-							cancel();
-							await notice({
-								title: 'Unsaved item changes',
-								description: 'Save or discard your item changes first.'
-							});
-							return;
-						}
-						const ok = await ask({
-							title: `Add “${b.ref}” to stock?`,
-							description: `This adds ${data.totals.units} units to Shopify stock and updates the cost per item in Shopify. It cannot be undone from here.`,
-							confirmLabel: 'Add to stock'
-						});
-						if (!ok) return cancel();
-						return act('land')();
-					}}
-				>
-					<Input type="date" name="date" value={today} class="h-9 w-40" aria-label="Arrived on" />
-					<Button type="submit" disabled={!!busy || !data.lines.length}>
-						{busy === 'land' ? 'Landing…' : 'Arrived — add to stock'}
-					</Button>
-				</form>
 			</div>
 		{/if}
 	</div>
@@ -181,7 +271,7 @@
 			{(data.totals.weightG / 1000).toFixed(1)} kg
 		</Stat>
 		<Stat label="Goods">{formatRs(data.totals.goods)}</Stat>
-		<Stat label="DDP + other costs">{formatRs(data.totals.ddp + data.totals.extra)}</Stat>
+		<Stat label="Transport">{formatRs(data.totals.ddp + data.totals.extra)}</Stat>
 		<Stat label="Landed total">{formatRs(data.totals.landed)}</Stat>
 	</div>
 
@@ -230,7 +320,7 @@
 			<div>
 				<Card.Title>Items</Card.Title>
 				<Card.Description>
-					Landed per piece = price{isRmb ? ' × rate' : ''} + DDP share + other-costs share (both by weight).
+					Landed per piece = price{isRmb ? ' × rate' : ''} + transport share (see Transport below).
 				</Card.Description>
 			</div>
 			{#if !locked}
@@ -288,8 +378,7 @@
 						<Table.Head class="text-right">Price ({sym})</Table.Head>
 						<Table.Head class="text-right">Weight (g)</Table.Head>
 						<Table.Head class="text-right">Goods</Table.Head>
-						<Table.Head class="text-right">DDP</Table.Head>
-						<Table.Head class="text-right">Other</Table.Head>
+						<Table.Head class="text-right">Transport</Table.Head>
 						<Table.Head class="text-right">Landed / pc</Table.Head>
 						<Table.Head class="text-right">{locked ? 'Cost before' : 'Current cost'}</Table.Head>
 						<Table.Head class="pr-6 text-right">Line total</Table.Head>
@@ -354,7 +443,6 @@
 							{/if}
 							<Table.Cell class="text-right"><Money paisa={l.goods} /></Table.Cell>
 							<Table.Cell class="text-right"><Money paisa={l.ddp} muted /></Table.Cell>
-							<Table.Cell class="text-right"><Money paisa={l.extra} muted /></Table.Cell>
 							<Table.Cell class="text-right font-medium"><Money paisa={l.landed} /></Table.Cell>
 							<Table.Cell class="text-right text-muted-foreground">
 								{#if !locked && l.variant}<Money paisa={l.variant.avgCost} muted />{:else}—{/if}
@@ -398,177 +486,293 @@
 		</Card.Content>
 	</Card.Root>
 
-	<div class="grid gap-4 lg:grid-cols-2">
-		<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
-			<Card.Header>
-				<Card.Title>Shipment DDP</Card.Title>
-				<Card.Description>
-					Enter the box weight the forwarder billed when the boxes arrive. The DDP bill is split
-					across items by their weight (unit weight × qty), so cartons and packing are shared
-					fairly.
-				</Card.Description>
-			</Card.Header>
-			<Card.Content class="grid gap-4">
-				<form
-					method="POST"
-					action={formAction('shipment')}
-					use:enhance={act('shipment', () => (shipEdit = null))}
-					class="flex flex-wrap items-end gap-3"
-				>
-					<fieldset disabled={locked} class="contents">
-						<div class="grid gap-1.5">
-							<Label for="billedKg">Billed box weight (kg)</Label>
-							<Input
-								id="billedKg"
-								name="billedKg"
-								inputmode="decimal"
-								class="w-36"
-								value={ship.kg}
-								oninput={(ev) => (shipEdit = { ...ship, kg: ev.currentTarget.value })}
-								placeholder="e.g. 48.5"
-							/>
-						</div>
-						<div class="grid gap-1.5">
-							<Label for="ddp">DDP Rs per kg</Label>
-							<Input
-								id="ddp"
-								name="ddp"
-								inputmode="decimal"
-								class="w-32"
-								value={ship.rate}
-								oninput={(ev) => (shipEdit = { ...ship, rate: ev.currentTarget.value })}
-							/>
-						</div>
-						{#if !locked}
-							{#if shipDirty}
-								<div class="flex items-center gap-2">
-									<Button type="submit" disabled={!!busy}
-										>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button
-									>
-									<Button type="button" variant="ghost" size="sm" onclick={() => (shipEdit = null)}
-										>Undo</Button
-									>
-									<span class="text-xs text-warning">Not applied yet</span>
-								</div>
-							{:else if data.shipment.ddpPending}
-								<span class="flex h-9 items-center"
-									><StatusBadge tone="warning" label="DDP pending — enter box weight" /></span
-								>
-							{:else}
-								<span class="flex h-9 items-center gap-1.5 text-sm text-success"
-									><CircleCheck class="size-4" /> Applied to items</span
-								>
-							{/if}
-						{/if}
-					</fieldset>
-				</form>
-				<div class="flex flex-wrap gap-x-8 gap-y-2 text-sm">
-					<div>
-						<span class="text-muted-foreground">DDP to split</span>
-						<div class="num font-medium">
-							{#if data.shipment.ddpTotal !== null}{formatRs(
-									data.shipment.ddpTotal
-								)}{:else if b.ddpRatePerKg === 0}Rs 0 (local){:else}<span class="text-warning"
-									>pending — showing estimate {formatRs(data.totals.ddp)}</span
-								>{/if}
+	<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
+		<Card.Header>
+			<div class="flex flex-wrap items-center justify-between gap-2">
+				<Card.Title>Transport</Card.Title>
+				{#if !locked}
+					{#if shipDirty}
+						<StatusBadge tone="warning" label="Not applied yet" />
+					{:else if data.shipment.ddpPending}
+						<StatusBadge tone="warning" label="Pending — enter box weight" />
+					{:else}
+						<span class="flex items-center gap-1.5 text-sm text-success"
+							><CircleCheck class="size-4" /> Applied to items</span
+						>
+					{/if}
+				{/if}
+			</div>
+		</Card.Header>
+		<Card.Content>
+			<form
+				method="POST"
+				action={formAction('shipment')}
+				use:enhance={act('shipment', () => (shipEdit = null))}
+				class="grid gap-5"
+			>
+				<fieldset disabled={locked} class="contents">
+					<input type="hidden" name="mode" value={ship.mode} />
+					<input type="hidden" name="split" value={ship.split} />
+
+					<div class="grid gap-1.5">
+						<span class="text-sm font-medium">How was transport charged?</span>
+						<div class="flex flex-wrap items-center gap-3">
+							{@render segmented(
+								[
+									['perkg', 'Per kg'],
+									['fixed', 'Fixed bill']
+								],
+								ship.mode,
+								(m) => (shipEdit = { ...ship, mode: m as ShipMode })
+							)}
+							<span class="text-xs text-muted-foreground">
+								{ship.mode === 'fixed'
+									? 'e.g. local carriage — one amount for the whole purchase'
+									: 'billed box weight × rate, shared by item weight'}
+							</span>
 						</div>
 					</div>
-					{#if data.shipment.overhead !== null}
-						<div>
-							<span class="text-muted-foreground">Packing overhead</span>
-							<div class={['num font-medium', data.shipment.overhead < 0 ? 'text-danger' : '']}>
-								{data.shipment.overhead >= 0 ? '+' : ''}{(data.shipment.overhead * 100).toFixed(0)}%
-								<span class="text-xs font-normal text-muted-foreground">billed vs item weights</span
+
+					<div class="flex flex-wrap items-end gap-x-4 gap-y-4">
+						{#if ship.mode === 'fixed'}
+							<div class="grid gap-1.5">
+								<Label for="bill">Bill amount (Rs)</Label>
+								<Input
+									id="bill"
+									name="bill"
+									inputmode="decimal"
+									class="w-36"
+									value={ship.bill}
+									oninput={(ev) => (shipEdit = { ...ship, bill: ev.currentTarget.value })}
+									placeholder="e.g. 1500"
+								/>
+							</div>
+							<div class="grid gap-1.5">
+								<span class="text-sm font-medium">Share it by</span>
+								{@render segmented(
+									[
+										['weight', 'Weight'],
+										['value', 'Price']
+									],
+									ship.split,
+									(m) => (shipEdit = { ...ship, split: m as 'weight' | 'value' })
+								)}
+							</div>
+							<span class="pb-2 text-xs text-muted-foreground">
+								{ship.split === 'value'
+									? 'costlier items carry more of the bill'
+									: 'heavier items carry more of the bill'}
+							</span>
+						{:else}
+							<div class="grid gap-1.5">
+								<Label for="billedKg">Billed box weight (kg)</Label>
+								<Input
+									id="billedKg"
+									name="billedKg"
+									inputmode="decimal"
+									class="w-36"
+									value={ship.kg}
+									oninput={(ev) => (shipEdit = { ...ship, kg: ev.currentTarget.value })}
+									placeholder="when boxes arrive"
+								/>
+							</div>
+							<span class="pb-2 text-muted-foreground">×</span>
+							<div class="grid gap-1.5">
+								<Label for="ddp">Rate per kg (Rs)</Label>
+								<Input
+									id="ddp"
+									name="ddp"
+									inputmode="decimal"
+									class="w-32"
+									value={ship.rate}
+									oninput={(ev) => (shipEdit = { ...ship, rate: ev.currentTarget.value })}
+								/>
+							</div>
+						{/if}
+					</div>
+
+					<div
+						class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 px-4 py-3 text-sm"
+					>
+						<div class="grid gap-0.5">
+							<div>
+								{#if live.total === null}
+									<span class="text-warning"
+										>~{formatRs(data.totals.ddp)} estimated from item weights — enter the billed box weight
+										when the boxes arrive</span
+									>
+								{:else if live.total === 0}
+									No transport on this purchase.
+								{:else}
+									<b class="num text-base">{formatRs(live.total)}</b> shared across the items by
+									<b>{live.split === 'value' ? 'price' : 'weight'}</b>
+								{/if}
+							</div>
+							{#if live.fallback}
+								<div class="text-xs text-warning">
+									{data.shipment.itemsWithoutWeight} items have no weight, so it's shared by price.
+								</div>
+							{/if}
+							{#if live.overhead !== null}
+								<div
+									class={['text-xs', live.overhead < 0 ? 'text-danger' : 'text-muted-foreground']}
+								>
+									{live.overhead < 0
+										? "Billed weight is less than the items' weights — check the item weights."
+										: `Box is ${(live.overhead * 100).toFixed(0)}% heavier than the items (cartons, packing).`}
+								</div>
+							{/if}
+						</div>
+						{#if !locked && shipDirty}
+							<div class="flex items-center gap-2">
+								<Button type="button" variant="ghost" onclick={() => (shipEdit = null)}>Undo</Button
+								>
+								<Button type="submit" disabled={!!busy}
+									>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button
 								>
 							</div>
-						</div>
-					{/if}
-					{#if data.shipment.itemsWithoutWeight}
-						<div class="text-danger">
-							{data.shipment.itemsWithoutWeight} items have no weight — they get no DDP share.
-						</div>
-					{/if}
-					{#if data.shipment.overhead !== null && data.shipment.overhead < 0}
-						<div class="text-danger">
-							Billed weight is less than the items' weights — check the item weights.
-						</div>
-					{/if}
-				</div>
-			</Card.Content>
-		</Card.Root>
-
-		<Card.Root>
-			<Card.Header>
-				<Card.Title>Other costs</Card.Title>
-				<Card.Description
-					>Clearance, local cartage, extras… split across items by weight, like DDP.</Card.Description
-				>
-			</Card.Header>
-			<Card.Content class="grid gap-3">
-				{#each data.costs as c (c.id)}
-					<div class="flex items-center justify-between gap-2 text-sm">
-						<span
-							>{c.type === 'local_cartage' ? 'Local cartage' : 'Other'}{c.note
-								? ` · ${c.note}`
-								: ''}</span
-						>
-						<span class="flex items-center gap-1">
-							<Money paisa={c.amount} />
-							{#if !locked}
-								<form
-									method="POST"
-									action={formAction('removeCost')}
-									use:enhance={async (input) => {
-										const ok = await ask({
-											title: 'Remove this cost?',
-											description: `${c.type === 'local_cartage' ? 'Local cartage' : 'Other'}${c.note ? ` · ${c.note}` : ''} · ${formatRs(c.amount)}`,
-											confirmLabel: 'Remove',
-											destructive: true
-										});
-										if (!ok) return input.cancel();
-										return act('removeCost')();
-									}}
-								>
-									<input type="hidden" name="costId" value={c.id} />
-									<Button type="submit" size="icon-sm" variant="ghost" aria-label="Remove"
-										><Trash /></Button
-									>
-								</form>
-							{/if}
-						</span>
+						{/if}
 					</div>
-				{:else}
-					<p class="text-sm text-muted-foreground">None.</p>
-				{/each}
-				{#if !locked}
-					<form
-						method="POST"
-						action={formAction('addCost')}
-						use:enhance={act('cost')}
-						class="flex flex-wrap items-end gap-2"
+				</fieldset>
+			</form>
+		</Card.Content>
+	</Card.Root>
+
+	<Dialog.Root bind:open={arriveOpen}>
+		<Dialog.Content class="sm:max-w-xl">
+			<Dialog.Header>
+				<Dialog.Title>Mark “{b.ref}” arrived?</Dialog.Title>
+				<Dialog.Description>
+					Adds the stock to Shopify and updates costs in Shopify. <span
+						class="font-medium text-warning">This can't be undone from here.</span
 					>
-						<select
-							name="type"
-							class="h-9 rounded-md border bg-background px-2 text-sm"
-							aria-label="Type"
-						>
-							<option value="local_cartage">Local cartage</option>
-							<option value="other">Other</option>
-						</select>
-						<Input
-							name="amount"
-							inputmode="decimal"
-							placeholder="Rs"
-							class="w-28"
-							aria-label="Amount"
-						/>
-						<Input name="note" placeholder="Note" class="w-40 flex-1" aria-label="Note" />
-						<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
-					</form>
-				{/if}
-			</Card.Content>
-		</Card.Root>
-	</div>
+				</Dialog.Description>
+			</Dialog.Header>
+			<div class="grid gap-3 text-sm">
+				<div
+					class="grid grid-cols-2 gap-x-6 gap-y-1 rounded-lg bg-muted/50 px-3 py-2 sm:grid-cols-4"
+				>
+					<div>
+						<div class="text-xs text-muted-foreground">Arrived on</div>
+						<div class="font-medium">{arriveDate}</div>
+					</div>
+					<div>
+						<div class="text-xs text-muted-foreground">Units</div>
+						<div class="num font-medium">
+							{data.totals.units}
+							<span class="text-xs font-normal text-muted-foreground"
+								>· {data.lines.length} {data.lines.length === 1 ? 'product' : 'products'}</span
+							>
+						</div>
+					</div>
+					<div>
+						<div class="text-xs text-muted-foreground">Transport</div>
+						<div class="num font-medium">
+							{formatRs(data.totals.ddp)}
+							<span class="text-xs font-normal text-muted-foreground"
+								>{data.shipment.fixed ? 'fixed bill' : 'per kg'}</span
+							>
+						</div>
+					</div>
+					<div>
+						<div class="text-xs text-muted-foreground">Landed total</div>
+						<div class="num font-medium">{formatRs(data.totals.landed)}</div>
+					</div>
+				</div>
+
+				<div class="max-h-64 overflow-auto rounded-lg border">
+					<table class="w-full text-sm">
+						<thead class="sticky top-0 bg-background text-xs text-muted-foreground">
+							<tr>
+								<th class="px-3 py-1.5 text-left font-normal">Product</th>
+								<th class="px-2 py-1.5 text-right font-normal">Stock</th>
+								<th class="px-3 py-1.5 text-right font-normal">Cost</th>
+							</tr>
+						</thead>
+						<tbody>
+							{#each arrivePlan as p (p.l.id)}
+								<tr class={['border-t', p.big && 'bg-warning-soft/50']}>
+									<td class="max-w-64 px-3 py-1.5">
+										<div class="flex items-center gap-2">
+											<Thumb
+												src={p.l.variant?.imageUrl ?? null}
+												alt={p.l.variant?.productTitle ?? ''}
+												size={32}
+											/>
+											<div class="min-w-0">
+												<div class="truncate">{p.l.variant?.productTitle ?? '—'}</div>
+												{#if p.l.variant?.variantTitle}<div
+														class="truncate text-xs text-muted-foreground"
+													>
+														{p.l.variant.variantTitle}
+													</div>{/if}
+											</div>
+										</div>
+									</td>
+									<td class="num px-2 py-1.5 text-right whitespace-nowrap"
+										>{p.have} <span class="text-success">+{p.l.qty}</span></td
+									>
+									<td class="num px-3 py-1.5 text-right whitespace-nowrap">
+										{p.old ? formatRs(p.old) : 'none'} → <b>{formatRs(p.newAvg)}</b>
+										{#if p.big}<div class="text-xs text-warning">
+												big change — check price/weight
+											</div>{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+				<p class="text-xs text-muted-foreground">
+					New cost = average of the stock you have and this purchase (approximate until it's saved).
+				</p>
+
+				<div class="grid gap-1.5">
+					<Label for="arriveCheck">Type the total units ({data.totals.units}) to confirm</Label>
+					<Input
+						id="arriveCheck"
+						bind:value={arriveTyped}
+						inputmode="numeric"
+						autocomplete="off"
+						class="w-40"
+						onkeydown={(ev) => {
+							if (ev.key === 'Enter' && arriveOk) {
+								ev.preventDefault();
+								arriveConfirmed = true;
+								arriveForm?.requestSubmit();
+							}
+						}}
+					/>
+				</div>
+			</div>
+			<Dialog.Footer>
+				<Button variant="ghost" onclick={() => (arriveOpen = false)}>Cancel</Button>
+				<Button
+					disabled={!arriveOk || !!busy}
+					onclick={() => {
+						arriveConfirmed = true;
+						arriveForm?.requestSubmit();
+					}}>Add {data.totals.units} units to stock</Button
+				>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+
+	{#snippet segmented(options: [string, string][], value: string, pick: (v: string) => void)}
+		<div class="flex h-9 items-center rounded-md border p-0.5">
+			{#each options as [v, label] (v)}
+				<button
+					type="button"
+					class={[
+						'h-full rounded px-3 text-sm',
+						value === v ? 'bg-secondary font-medium' : 'text-muted-foreground hover:bg-accent'
+					]}
+					aria-pressed={value === v}
+					onclick={() => pick(v)}>{label}</button
+				>
+			{/each}
+		</div>
+	{/snippet}
 
 	{#if !locked}
 		<form
@@ -578,7 +782,7 @@
 			use:enhance={async ({ cancel }) => {
 				const ok = await ask({
 					title: `Delete purchase “${b.ref}”?`,
-					description: `Its ${data.lines.length} items and costs are removed too.`,
+					description: `Its ${data.lines.length} items are removed too.`,
 					confirmLabel: 'Delete',
 					destructive: true
 				});

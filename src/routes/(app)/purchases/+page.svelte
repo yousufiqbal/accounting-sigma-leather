@@ -19,7 +19,7 @@
 
 	const STATUS = {
 		draft: { tone: 'muted', label: 'draft' },
-		paid: { tone: 'info', label: 'paid · on the way' },
+		paid: { tone: 'info', label: 'purchased · incoming' },
 		landing: { tone: 'warning', label: 'adding to stock…' },
 		landed: { tone: 'success', label: 'landed' }
 	} as const;
@@ -56,7 +56,7 @@
 						<Table.Head class="text-right">Units</Table.Head>
 						<Table.Head class="text-right">Weight</Table.Head>
 						<Table.Head class="text-right">Goods</Table.Head>
-						<Table.Head class="text-right">DDP + other</Table.Head>
+						<Table.Head class="text-right">Transport</Table.Head>
 						<Table.Head class="pr-6 text-right">Landed total</Table.Head>
 					</Table.Row>
 				</Table.Header>
@@ -75,7 +75,7 @@
 								<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
 								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge
 										tone="warning"
-										label="DDP pending"
+										label="Transport pending"
 									/>{/if}
 								<div class="text-xs text-muted-foreground">
 									{b.status === 'landed'
@@ -160,7 +160,7 @@
 				</div>
 			{/if}
 			<div class="grid gap-2">
-				<Label for="ddp">DDP Rs per kg</Label>
+				<Label for="ddp">Transport Rs per kg</Label>
 				<Input
 					id="ddp"
 					name="ddp"

@@ -135,7 +135,7 @@
 	const views = $derived([
 		{ id: 'missing', label: `In stock, no cost (${data.counts.missing})` },
 		{ id: 'noweight', label: `No weight (${data.counts.noweight})` },
-		{ id: 'highddp', label: `High DDP (${data.counts.highddp})` },
+		{ id: 'highddp', label: `High transport (${data.counts.highddp})` },
 		{ id: 'estimated', label: `Estimated (${data.counts.estimated})` },
 		{ id: 'all', label: `All not yet purchased (${data.counts.all})` }
 	]);
@@ -285,7 +285,7 @@
 						/>
 					</div>
 					<div class="grid gap-1.5">
-						<Label for="ddp">DDP Rs per kg</Label>
+						<Label for="ddp">Transport Rs per kg</Label>
 						<Input
 							id="ddp"
 							name="ddp"
@@ -355,9 +355,9 @@
 			</div>
 			<Card.Description>
 				Buying price per piece (¥ from China, Rs from Pakistan). Enter/↓ = next row · paste a column
-				from Excel to fill down · Ctrl+S saves. Weight is saved to Shopify too. DDP / pc = weight ×
-				DDP rate unless you type one — “Local” = 0 for items bought in Pakistan; amber = DDP above
-				2× the goods cost.
+				from Excel to fill down · Ctrl+S saves. Weight is saved to Shopify too. Transport / pc =
+				weight × transport rate unless you type one — “Local” = 0 for items bought in Pakistan;
+				amber = transport above 2× the goods cost.
 			</Card.Description>
 		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
@@ -370,7 +370,7 @@
 							<Table.Head class="text-right">On hand</Table.Head>
 							<Table.Head>Weight (g)</Table.Head>
 							<Table.Head>Buying price</Table.Head>
-							<Table.Head>DDP / pc</Table.Head>
+							<Table.Head>Transport / pc</Table.Head>
 							<Table.Head class="text-right">Cost</Table.Head>
 							<Table.Head class="pr-6 text-right">Stock value</Table.Head>
 						</Table.Row>
@@ -476,12 +476,12 @@
 												oninput={(ev) => set(r, { ddp: ev.currentTarget.value })}
 												placeholder={(autoDdp(r, e) / 100).toFixed(0)}
 												inputmode="decimal"
-												title="Blank = weight × DDP rate. Type 0 for locally bought items."
+												title="Blank = weight × transport rate. Type 0 for locally bought items."
 												class={[
 													'h-8 w-20 text-right',
 													ddpHigh(r) && 'border-warning text-warning placeholder:text-warning'
 												]}
-												aria-label="DDP per piece"
+												aria-label="Transport per piece"
 												data-col="ddp"
 												data-row={i}
 												onfocus={(ev) => ev.currentTarget.select()}

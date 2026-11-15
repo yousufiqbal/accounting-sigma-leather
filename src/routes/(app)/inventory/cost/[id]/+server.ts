@@ -10,8 +10,24 @@ export const GET: RequestHandler = async ({ params }) => {
 	if (!v) error(404, 'Product not found');
 	const rates = await getRates();
 
+	// A bundle holds no stock or price of its own: its cost is the sum of its items.
+	const bundle = v.isBundle
+		? await db
+				.select({
+					id: schema.variants.id,
+					title: schema.variants.productTitle,
+					variant: schema.variants.variantTitle,
+					imageUrl: schema.variants.imageUrl,
+					qty: schema.bundleComponents.qty,
+					cost: schema.variants.avgCost
+				})
+				.from(schema.bundleComponents)
+				.innerJoin(schema.variants, eq(schema.variants.id, schema.bundleComponents.componentId))
+				.where(eq(schema.bundleComponents.bundleId, v.id))
+		: null;
+
 	const estimate =
-		v.estCnPriceMinor !== null
+		!bundle && v.estCnPriceMinor !== null
 			? {
 					price: v.estCnPriceMinor,
 					currency: v.estCurrency ?? 'RMB',
@@ -62,7 +78,9 @@ export const GET: RequestHandler = async ({ params }) => {
 		shopifyCostOk: v.shopifyCostOk,
 		onHand: v.shopifyOnHand,
 		estimate,
+		bundle,
 		purchases: purchases.filter((p) => p.landedOn),
-		history
+		// A bundle's cost just follows its items; old estimate entries on it only confuse.
+		history: bundle ? [] : history
 	});
 };

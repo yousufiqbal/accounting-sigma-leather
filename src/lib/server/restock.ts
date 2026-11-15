@@ -5,7 +5,7 @@
  *   on hand   — Shopify on-hand from the last sync (the panel syncs on open)
  *   committed — units on orders not shipped yet (already promised to customers)
  *   available — on hand − committed
- *   incoming  — units on purchases that haven't arrived yet (drafts included)
+ *   incoming  — units on purchases marked purchased that haven't arrived yet (not drafts)
  */
 import { error } from '@sveltejs/kit';
 import { and, asc, eq, sql } from 'drizzle-orm';
@@ -51,7 +51,7 @@ export async function liveStock(ids: string[]): Promise<Map<string, LiveStock>> 
 				where l.variant_id = v.id and l.qty > 0 and o.cancelled_at is null and o.test = 0
 					and coalesce(o.fulfillment_status, 'UNFULFILLED') in ('UNFULFILLED', 'ON_HOLD', 'SCHEDULED')), 0) as committed,
 			coalesce((select sum(bi.qty) from batch_items bi join import_batches b on b.id = bi.batch_id
-				where bi.variant_id = v.id and b.status != 'landed'), 0) as incoming
+				where bi.variant_id = v.id and b.status in ('paid', 'landing')), 0) as incoming
 		from variants v
 		where v.id in (select value from json_each(${list}))`)) as {
 		id: string;
