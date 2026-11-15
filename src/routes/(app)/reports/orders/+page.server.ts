@@ -11,7 +11,7 @@ import type { PageServerLoad } from './$types';
  *   not finished yet → estimated like the In progress page (usual courier fee + tax).
  * Cancelled orders are left out (unless the courier delivered them anyway).
  */
-const PRESETS = ['today', 'yesterday', '3d', '7d', 'custom'] as const;
+const PRESETS = ['today', 'yesterday', '3d', '7d', '30d', 'custom'] as const;
 type Preset = (typeof PRESETS)[number];
 
 const todayPkt = () => new Date(Date.now() + PKT_OFFSET_MS).toISOString().slice(0, 10);
@@ -29,6 +29,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	if (preset === 'yesterday') from = to = addDays(today, -1);
 	else if (preset === '3d') from = addDays(today, -2);
 	else if (preset === '7d') from = addDays(today, -6);
+	else if (preset === '30d') from = addDays(today, -29);
 	else if (preset === 'custom') {
 		const f = url.searchParams.get('from');
 		const t = url.searchParams.get('to');

@@ -19,7 +19,8 @@
 		{ id: 'today', label: 'Today' },
 		{ id: 'yesterday', label: 'Yesterday' },
 		{ id: '3d', label: 'Last 3 days' },
-		{ id: '7d', label: 'Last 7 days' }
+		{ id: '7d', label: 'Last 7 days' },
+		{ id: '30d', label: 'Last 30 days' }
 	] as const;
 	const STATE: Record<
 		string,
