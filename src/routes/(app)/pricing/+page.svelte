@@ -262,9 +262,9 @@
 						<Table.Head class="text-right">Cost</Table.Head>
 						<Table.Head class="text-right">Sold {data.windowDays}d</Table.Head>
 						<Table.Head class="text-right">Price</Table.Head>
-						<Table.Head class="text-right">Profit / pc</Table.Head>
 						<Table.Head class="text-right">Suggested</Table.Head>
-						<Table.Head class="pr-6">New price</Table.Head>
+						<Table.Head>New price</Table.Head>
+						<Table.Head class="pr-6 text-right">Profit / pc</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -345,12 +345,6 @@
 								{#if r.returned}<div class="text-xs text-danger">{r.returned} returned</div>{/if}
 							</Table.Cell>
 							<Table.Cell class="text-right font-medium"><Money paisa={r.price} /></Table.Cell>
-							<Table.Cell class="text-right" title="Price × 0.96 (4% COD tax) − cost">
-								{#if r.profit !== null}
-									<span class={['num font-medium', tone(r.margin)]}>{formatRs(r.profit)}</span>
-									<div class={['text-xs', tone(r.margin)]}>{formatPct(r.margin ?? 0, 0)}</div>
-								{:else}<span class="text-muted-foreground">—</span>{/if}
-							</Table.Cell>
 							<Table.Cell class="text-right">
 								{#if r.suggested}
 									<button
@@ -364,7 +358,7 @@
 									>
 								{:else}<span class="text-muted-foreground">—</span>{/if}
 							</Table.Cell>
-							<Table.Cell class="pr-6">
+							<Table.Cell>
 								<div class="flex items-center gap-2">
 									<Input
 										value={edits[r.id]?.val ?? ''}
@@ -381,12 +375,23 @@
 												{formatRs(Math.abs(np - r.price))}
 												{np < r.price ? 'lower' : 'higher'}</span
 											>
-											{#if npProfit !== null}<span class={['num', tone(npProfit / np)]}
-													>{formatRs(npProfit)} · {formatPct(npProfit / np, 0)}</span
-												>{/if}
 										</div>
 									{/if}
 								</div>
+							</Table.Cell>
+							<Table.Cell class="pr-6 text-right" title="Price × 0.96 (4% COD tax) − cost">
+								{#if npProfit !== null && np !== null}
+									<span class={['num font-medium', tone(npProfit / np)]}>{formatRs(npProfit)}</span>
+									<div class={['text-xs', tone(npProfit / np)]}>{formatPct(npProfit / np, 0)}</div>
+									{#if r.profit !== null && np !== r.price}<div
+											class="text-xs text-muted-foreground"
+										>
+											was {formatRs(r.profit)}
+										</div>{/if}
+								{:else if r.profit !== null}
+									<span class={['num font-medium', tone(r.margin)]}>{formatRs(r.profit)}</span>
+									<div class={['text-xs', tone(r.margin)]}>{formatPct(r.margin ?? 0, 0)}</div>
+								{:else}<span class="text-muted-foreground">—</span>{/if}
 							</Table.Cell>
 						</Table.Row>
 					{:else}
