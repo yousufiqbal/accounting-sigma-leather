@@ -1,11 +1,10 @@
 import { sql } from 'drizzle-orm';
 import { ADMIN_EMAIL } from '$app/env/private';
 import { db } from '#lib/server/db/index.js';
-import { currentMonth, isMonth } from '#lib/month.js';
+import { monthFromUrl } from '#lib/month.js';
 import type { LayoutServerLoad } from './$types';
 
 export const load: LayoutServerLoad = async ({ url }) => {
-	const m = url.searchParams.get('m');
 	// Sidebar attention counters + sync status (cheap).
 	const [counts] = (await db.all(sql`
 		select
@@ -21,7 +20,7 @@ export const load: LayoutServerLoad = async ({ url }) => {
 		lastDex: string | null;
 	}[];
 	return {
-		month: isMonth(m) ? m : currentMonth(),
+		month: monthFromUrl(url),
 		email: ADMIN_EMAIL,
 		attention: { couriers: counts.couriers, inventory: counts.inventory },
 		sync: { last: counts.lastSync, lastDex: counts.lastDex }

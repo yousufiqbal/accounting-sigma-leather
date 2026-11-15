@@ -40,6 +40,48 @@ export async function periodStatement(from: string, to: string, month: string | 
 	const start = new Date(Date.parse(`${from}T00:00:00Z`) - PKT_OFFSET_MS).toISOString();
 	const end = new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000 - PKT_OFFSET_MS).toISOString();
 
+	// Queries that don't depend on each other start together (Turso round trips add up).
+	const months = monthsBetween(from.slice(0, 7), to.slice(0, 7));
+	const courierQ = db.all(sql`
+		select
+			coalesce(sum(case when status = 'delivered' then fee_paisa + fee_tax_paisa else 0 end), 0) as delivery,
+			coalesce(sum(case when status = 'returned' then fee_paisa + fee_tax_paisa + return_fee_paisa + return_fee_tax_paisa else 0 end), 0) as returns,
+			coalesce(sum(case when status = 'delivered' then itwh_paisa + stwh_paisa else 0 end), 0) as withholding,
+			coalesce(sum(other_fees_paisa), 0) as other,
+			coalesce(sum(case when status = 'delivered' then 1 else 0 end), 0) as delivered,
+			coalesce(sum(case when status = 'returned' then 1 else 0 end), 0) as returned,
+			coalesce(sum(case when fees_estimated = 1 or taxes_estimated = 1 then 1 else 0 end), 0) as estimated,
+			coalesce(sum(case when status = 'delivered' and order_id is null then 1 else 0 end), 0) as unmatchedDelivered,
+			coalesce(sum(case when status = 'delivered' and order_id is null then cod_paisa else 0 end), 0) as unmatchedCod
+		from shipments
+		where final_at >= ${start} and final_at < ${end}
+			and status in ('delivered', 'returned') and match_status != 'excluded'`);
+	const expensesQ = db
+		.select({
+			category: schema.expenseCategories.name,
+			group: schema.expenseCategories.group,
+			amount: sql<number>`sum(${schema.expenses.amount})`
+		})
+		.from(schema.expenses)
+		.innerJoin(
+			schema.expenseCategories,
+			eq(schema.expenseCategories.id, schema.expenses.categoryId)
+		)
+		.where(and(gte(schema.expenses.date, from), lte(schema.expenses.date, to)))
+		.groupBy(schema.expenseCategories.id)
+		.orderBy(sql`sum(${schema.expenses.amount}) desc`);
+	const writeOffQ = db.all(sql`
+		select
+			coalesce(sum(case when m.reason in ('damaged', 'missing', 'count')
+				then -m.qty_delta * coalesce(nullif(m.unit_cost_paisa, 0), v.avg_cost_paisa, 0) else 0 end), 0) as amount,
+			coalesce(sum(case when m.reason is null then 1 else 0 end), 0) as pending
+		from stock_movements m left join variants v on v.id = m.variant_id
+		where m.type = 'variance' and m.at >= ${start} and m.at < ${end}`);
+	const locksQ = db
+		.select({ month: schema.monthLocks.month, at: schema.monthLocks.lockedAt })
+		.from(schema.monthLocks)
+		.where(inArray(schema.monthLocks.month, months));
+
 	// ── Sales ──
 	const orders = (await db.all(DELIVERED_ORDERS(start, end))) as {
 		id: string;
@@ -120,20 +162,7 @@ export async function periodStatement(from: string, to: string, month: string | 
 	const grossProfit = netSales - cogs;
 
 	// ── Courier ──
-	const [c] = (await db.all(sql`
-		select
-			coalesce(sum(case when status = 'delivered' then fee_paisa + fee_tax_paisa else 0 end), 0) as delivery,
-			coalesce(sum(case when status = 'returned' then fee_paisa + fee_tax_paisa + return_fee_paisa + return_fee_tax_paisa else 0 end), 0) as returns,
-			coalesce(sum(case when status = 'delivered' then itwh_paisa + stwh_paisa else 0 end), 0) as withholding,
-			coalesce(sum(other_fees_paisa), 0) as other,
-			coalesce(sum(case when status = 'delivered' then 1 else 0 end), 0) as delivered,
-			coalesce(sum(case when status = 'returned' then 1 else 0 end), 0) as returned,
-			coalesce(sum(case when fees_estimated = 1 or taxes_estimated = 1 then 1 else 0 end), 0) as estimated,
-			coalesce(sum(case when status = 'delivered' and order_id is null then 1 else 0 end), 0) as unmatchedDelivered,
-			coalesce(sum(case when status = 'delivered' and order_id is null then cod_paisa else 0 end), 0) as unmatchedCod
-		from shipments
-		where final_at >= ${start} and final_at < ${end}
-			and status in ('delivered', 'returned') and match_status != 'excluded'`)) as {
+	const [c] = (await courierQ) as {
 		delivery: number;
 		returns: number;
 		withholding: number;
@@ -147,44 +176,21 @@ export async function periodStatement(from: string, to: string, month: string | 
 	const courierTotal = c.delivery + c.returns + c.withholding + c.other;
 
 	// ── Expenses ──
-	const exp = await db
-		.select({
-			category: schema.expenseCategories.name,
-			group: schema.expenseCategories.group,
-			amount: sql<number>`sum(${schema.expenses.amount})`
-		})
-		.from(schema.expenses)
-		.innerJoin(
-			schema.expenseCategories,
-			eq(schema.expenseCategories.id, schema.expenses.categoryId)
-		)
-		.where(and(gte(schema.expenses.date, from), lte(schema.expenses.date, to)))
-		.groupBy(schema.expenseCategories.id)
-		.orderBy(sql`sum(${schema.expenses.amount}) desc`);
+	const exp = await expensesQ;
 	const marketing = exp.filter((e) => e.group === 'marketing');
 	const operating = exp.filter((e) => e.group !== 'marketing');
 	const marketingTotal = marketing.reduce((s, e) => s + e.amount, 0);
 	const operatingTotal = operating.reduce((s, e) => s + e.amount, 0);
 
 	// ── Stock write-offs (damaged / missing / count fixes from Shopify stock checks) ──
-	const [wo] = (await db.all(sql`
-		select
-			coalesce(sum(case when m.reason in ('damaged', 'missing', 'count')
-				then -m.qty_delta * coalesce(nullif(m.unit_cost_paisa, 0), v.avg_cost_paisa, 0) else 0 end), 0) as amount,
-			coalesce(sum(case when m.reason is null then 1 else 0 end), 0) as pending
-		from stock_movements m left join variants v on v.id = m.variant_id
-		where m.type = 'variance' and m.at >= ${start} and m.at < ${end}`)) as {
+	const [wo] = (await writeOffQ) as {
 		amount: number;
 		pending: number;
 	}[];
 
 	const netProfit = grossProfit - courierTotal - marketingTotal - operatingTotal - wo.amount;
 
-	const months = monthsBetween(from.slice(0, 7), to.slice(0, 7));
-	const locks = await db
-		.select({ month: schema.monthLocks.month, at: schema.monthLocks.lockedAt })
-		.from(schema.monthLocks)
-		.where(inArray(schema.monthLocks.month, months));
+	const locks = await locksQ;
 	const lock = locks.length === months.length ? locks[0] : null;
 	const provisional = c.estimated > 0 || cogsEstimated > 0 || unitsNoCost > 0;
 

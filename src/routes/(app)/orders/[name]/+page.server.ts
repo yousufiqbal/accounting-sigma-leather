@@ -12,19 +12,18 @@ export const load: PageServerLoad = async ({ params }) => {
 	});
 	if (!order) error(404, `Order #${name} not found`);
 
-	const [profit] = await orderProfits({ ids: [order.id] });
-	const customer = order.customerId
-		? ((
-				await db.all(
-					sql`select id, name, (select count(*) from orders where customer_id = ${order.customerId}) as orders
+	// Everything below only needs the order id — run the queries together, not one by one.
+	const profitP = orderProfits({ ids: [order.id] });
+	const customerP = order.customerId
+		? db.all(
+				sql`select id, name, (select count(*) from orders where customer_id = ${order.customerId}) as orders
 						from customers where id = ${order.customerId}`
-				)
-			)[0] as { id: string; name: string | null; orders: number } | undefined)
-		: undefined;
+			)
+		: Promise.resolve([]);
 	const courierOnly = !!order.cancelledAt || order.total <= 0;
 
 	// Items actually sent (cancelled-but-delivered orders: the ordered quantity).
-	const lines = (await db.all(sql`
+	const linesP = db.all(sql`
 		select l.id, l.title, l.sku, l.variant_id as variantId,
 			v.product_title as productTitle, v.variant_title as variantTitle, v.image_url as imageUrl,
 			coalesce(v.cost_source, 'none') as costSource,
@@ -35,7 +34,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			(l.cost_estimated = 1 or (l.cost_snapshot_paisa is null and coalesce(v.cost_source, 'none') != 'batch')) as estimated
 		from order_lines l left join variants v on v.id = l.variant_id
 		where l.order_id = ${order.id}
-		order by l.unit_price_paisa desc`)) as {
+		order by l.unit_price_paisa desc`);
+	type Line = {
 		id: string;
 		title: string;
 		sku: string | null;
@@ -52,7 +52,7 @@ export const load: PageServerLoad = async ({ params }) => {
 		estimated: number;
 	}[];
 
-	const parcels = (await db.all(sql`
+	const parcelsP = db.all(sql`
 		select s.id, s.courier, s.tracking_no as trackingNo, s.status, s.courier_status as courierStatus,
 			s.booked_at as bookedAt, s.final_at as finalAt, s.city, s.weight_kg as weightKg,
 			s.cod_paisa as cod, s.fee_paisa as fee, s.fee_tax_paisa as feeTax,
@@ -63,7 +63,8 @@ export const load: PageServerLoad = async ({ params }) => {
 			st.number as statement, st.statement_date as statementDate
 		from shipments s left join statements st on st.id = s.statement_id
 		where s.order_id = ${order.id} and s.status != 'cancelled'
-		order by coalesce(s.final_at, s.booked_at) desc`)) as {
+		order by coalesce(s.final_at, s.booked_at) desc`);
+	type Parcel = {
 		id: string;
 		courier: 'postex' | 'dex' | 'manual';
 		trackingNo: string;
@@ -90,6 +91,14 @@ export const load: PageServerLoad = async ({ params }) => {
 		statement: string | null;
 		statementDate: string | null;
 	}[];
+
+	const [[profit], customerRows, lines, parcels] = await Promise.all([
+		profitP,
+		customerP as Promise<{ id: string; name: string | null; orders: number }[]>,
+		linesP as Promise<Line>,
+		parcelsP as Promise<Parcel>
+	]);
+	const customer = customerRows[0];
 
 	const shipped =
 		order.fulfillmentStatus === 'FULFILLED' || order.fulfillmentStatus === 'PARTIALLY_FULFILLED';

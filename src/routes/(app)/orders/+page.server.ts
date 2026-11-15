@@ -3,6 +3,7 @@ import { and, desc, eq, isNull, like, or, sql, type SQL } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import { orderProfits } from '#lib/server/order-profit.js';
+import { monthFromUrl } from '#lib/month.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const PAGE_SIZE = 50;
@@ -74,8 +75,8 @@ async function orderRows(where: SQL) {
 	});
 }
 
-export const load: PageServerLoad = async ({ url, parent }) => {
-	const { month } = await parent();
+export const load: PageServerLoad = async ({ url }) => {
+	const month = monthFromUrl(url); // not via parent(): saves a round trip
 	const sort = (SORTS as readonly string[]).includes(url.searchParams.get('sort') ?? '')
 		? (url.searchParams.get('sort') as (typeof SORTS)[number])
 		: 'recent';

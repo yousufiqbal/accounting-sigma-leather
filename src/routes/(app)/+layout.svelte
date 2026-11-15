@@ -135,6 +135,7 @@
 							{#snippet child({ props })}
 								<a
 									href={navHref(n.href)}
+									data-sveltekit-preload-code="eager"
 									{...props}
 									title={count ? hint('badge' in n ? n.badge : '', count) : undefined}
 								>
@@ -164,7 +165,7 @@
 						class={item}
 					>
 						{#snippet child({ props })}
-							<a href={navHref(settingsNav.href)} {...props}>
+							<a href={navHref(settingsNav.href)} data-sveltekit-preload-code="eager" {...props}>
 								<settingsNav.icon />
 								<span>{settingsNav.label}</span>
 							</a>

@@ -2,13 +2,13 @@ import { sql } from 'drizzle-orm';
 import { db } from '#lib/server/db/index.js';
 import { incomeStatement } from '#lib/server/pnl.js';
 import { stockSummary } from '#lib/server/costing.js';
-import { currentMonth, shiftMonth } from '#lib/month.js';
+import { currentMonth, monthFromUrl, shiftMonth } from '#lib/month.js';
 import type { PageServerLoad } from './$types';
 
 const FIRST_MONTH = '2025-12'; // first Shopify sale
 
-export const load: PageServerLoad = async ({ parent }) => {
-	const { month } = await parent();
+export const load: PageServerLoad = async ({ url }) => {
+	const month = monthFromUrl(url); // not via parent(): saves a round trip
 	// Every month from the first sale to the current month (not limited by the selected month).
 	const months: string[] = [];
 	for (let m = FIRST_MONTH; m <= currentMonth(); m = shiftMonth(m, 1)) months.push(m);

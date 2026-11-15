@@ -2,7 +2,7 @@ import { fail } from '@sveltejs/kit';
 import { and, asc, desc, eq, gte, lt, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
-import { monthEnd, shiftMonth } from '#lib/month.js';
+import { monthEnd, monthFromUrl, shiftMonth } from '#lib/month.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const cat = schema.expenseCategories;
@@ -43,8 +43,8 @@ async function isLocked(date: string) {
 	}));
 }
 
-export const load: PageServerLoad = async ({ parent }) => {
-	const { month } = await parent();
+export const load: PageServerLoad = async ({ url }) => {
+	const month = monthFromUrl(url); // not via parent(): saves a round trip
 	const cats = await categories();
 	const rows = await db
 		.select()

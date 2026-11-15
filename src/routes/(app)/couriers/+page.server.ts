@@ -15,7 +15,7 @@ import {
 	type SQL
 } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
-import { monthBoundsUtc } from '#lib/month.js';
+import { monthBoundsUtc, monthFromUrl } from '#lib/month.js';
 import { postexConfigured } from '#lib/server/postex.js';
 import { ImportError, stageUpload } from '#lib/server/couriers/import-file.js';
 import type { Actions, PageServerLoad } from './$types';
@@ -64,8 +64,8 @@ function attentionWhere(thresholds: { courier: string; limit: number }[]): SQL {
 	)!;
 }
 
-export const load: PageServerLoad = async ({ url, parent }) => {
-	const { month } = await parent();
+export const load: PageServerLoad = async ({ url }) => {
+	const month = monthFromUrl(url); // not via parent(): saves a round trip
 	const { start, end } = monthBoundsUtc(month);
 	const view: View = (VIEWS as readonly string[]).includes(url.searchParams.get('view') ?? '')
 		? (url.searchParams.get('view') as View)

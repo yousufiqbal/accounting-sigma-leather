@@ -61,3 +61,9 @@ export function dateLabel(date: string): string {
 		timeZone: 'UTC'
 	});
 }
+
+/** The month picked in the top bar (?m=YYYY-MM), else the current month. */
+export function monthFromUrl(url: URL): string {
+	const m = url.searchParams.get('m');
+	return isMonth(m) ? m : currentMonth();
+}

@@ -6,6 +6,7 @@ import {
 	fyStart,
 	isMonth,
 	monthEnd,
+	monthFromUrl,
 	monthLabel,
 	monthsBetween,
 	shiftMonth
@@ -43,8 +44,8 @@ function presets() {
 	];
 }
 
-export const load: PageServerLoad = async ({ parent, url }) => {
-	const { month } = await parent();
+export const load: PageServerLoad = async ({ url }) => {
+	const month = monthFromUrl(url); // not via parent(): saves a round trip
 	const from = url.searchParams.get('from');
 	const to = url.searchParams.get('to');
 
