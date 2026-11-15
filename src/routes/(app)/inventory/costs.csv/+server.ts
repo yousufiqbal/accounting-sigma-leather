@@ -32,7 +32,7 @@ export const GET: RequestHandler = async () => {
 		'shopify_cost_correct',
 		'buying_price',
 		'currency',
-		'ddp_per_piece',
+		'transport_per_piece',
 		'cost_used'
 	];
 	const lines = rows.map((r) =>

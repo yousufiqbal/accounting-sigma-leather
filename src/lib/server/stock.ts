@@ -2,7 +2,7 @@
  * Stock ledger + import batches (SPEC.md §3 "Imports", §5).
  *
  * Landed unit cost = unit price × FX (PKR: as-is)
- *                  + unit kg × DDP rate/kg
+ *                  + unit kg × transport rate/kg
  *                  + share of extra batch costs (by goods value).
  * Landing a batch:
  *   0. claims the batch (status → 'landing'; a second click is refused) and saves the

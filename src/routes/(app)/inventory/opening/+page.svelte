@@ -71,7 +71,7 @@
 		return Number.isFinite(w) && w > 0 ? w : 0;
 	};
 
-	/** Automatic DDP per piece (paisa): weight × rate; local (Rs) prices default to 0. */
+	/** Automatic transport per piece (paisa): weight × rate; local (Rs) prices default to 0. */
 	const autoDdp = (r: Row, e: Edit) =>
 		e.currency === 'PKR' ? 0 : Math.round((weightG(r) / 1000) * ddpRs * 100);
 	function ddpUsed(r: Row): number {
@@ -166,7 +166,7 @@
 			focusCell(row - 1, col);
 		}
 	}
-	/** Paste from Excel: lines fill down from this row; tab-separated cells fill across (weight → price → DDP). */
+	/** Paste from Excel: lines fill down from this row; tab-separated cells fill across (weight → price → transport). */
 	function gridPaste(e: ClipboardEvent) {
 		const t = e.target as HTMLElement;
 		const col = t.dataset?.col as Col | undefined;

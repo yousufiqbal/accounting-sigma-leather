@@ -3,7 +3,7 @@
  *
  * Every variant has one "cost used" (`avg_cost_paisa`) and where it came from (`cost_source`):
  *   batch      – weighted average from landed import batches (never touched by estimates)
- *   estimated  – buying price × yuan rate + kg × DDP rate/kg (PKR price: used as-is, no DDP)
+ *   estimated  – buying price × yuan rate + kg × transport rate/kg (PKR price: used as-is, no transport)
  *   shopify    – owner ticked "Shopify cost is correct"
  *   none       – nothing known yet
  * Estimate wins over a trusted Shopify cost when both exist (owner typed it on purpose).
@@ -18,7 +18,7 @@ import { getSetting, setSetting } from './settings.js';
 const v = schema.variants;
 
 export type CostRates = {
-	/** DDP cargo, paisa per kg. */
+	/** Transport (China forwarder), paisa per kg. */
 	ddpPerKg: number;
 	/** PKR per 1 yuan × 10,000 (e.g. 39.5 → 395000). */
 	rmbFx: number;
@@ -42,7 +42,7 @@ export function ddpCost(weightG: number | null, ddpPerKg: number) {
 	return Math.round(((weightG ?? 0) * ddpPerKg) / 1000);
 }
 
-/** DDP per piece: override if set (0 = local), else weight × rate; PKR (local) prices default to 0. */
+/** Transport per piece: override if set (0 = local), else weight × rate; PKR (local) prices default to 0. */
 export function estDdp(
 	row: { estCurrency: 'RMB' | 'PKR' | null; weightG: number | null; estDdp: number | null },
 	r: CostRates
@@ -176,7 +176,7 @@ export async function saveCostInputs(
 		priceMinor: number | null;
 		currency: 'RMB' | 'PKR';
 		shopifyCostOk: boolean;
-		/** DDP per piece override; null = automatic; undefined = leave as is. */
+		/** Transport per piece override; null = automatic; undefined = leave as is. */
 		ddp?: number | null;
 	}[]
 ) {

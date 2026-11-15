@@ -18,7 +18,7 @@ const VIEWS = ['missing', 'estimated', 'noweight', 'highddp', 'all'] as const;
 type View = (typeof VIEWS)[number];
 const v = schema.variants;
 
-/** Automatic DDP above 2× the goods cost (yuan items, no override) — worth checking. */
+/** Automatic transport above 2× the goods cost (yuan items, no override) — worth checking. */
 const highDdp = (rmbFx: number, ddpPerKg: number) =>
 	sql`${v.costSource} = 'estimated' and ${v.estDdp} is null and coalesce(${v.estCurrency}, 'RMB') = 'RMB'
 		and coalesce(${v.weightG}, 0) * ${ddpPerKg} / 1000.0 > 2 * ${v.estCnPriceMinor} * ${rmbFx} / 10000.0`;
@@ -223,7 +223,7 @@ export const actions: Actions = {
 		const iPrice = col('buyingprice', 'chinaprice', 'price', 'cnprice');
 		const iCur = col('currency');
 		const iOk = col('shopifycostcorrect');
-		const iDdp = col('ddpperpiece', 'ddp');
+		const iDdp = col('transportperpiece', 'transport', 'ddpperpiece', 'ddp');
 		const iW = col('weightg', 'weight');
 		if ((iPrice < 0 && iW < 0) || (iId < 0 && iSku < 0))
 			return fail(400, {

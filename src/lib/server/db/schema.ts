@@ -49,9 +49,9 @@ export const variants = sqliteTable(
 			.default('none'),
 		estCnPriceMinor: integer('est_cn_price_minor'), // for opening estimate, e.g. RMB fen
 		estCurrency: text('est_currency', { enum: ['RMB', 'PKR'] }),
-		/** DDP per piece override (paisa). null = weight × DDP rate (0 for PKR); 0 = local, no DDP. */
+		/** Transport per piece override (paisa). null = weight × transport rate (0 for PKR); 0 = local, none. */
 		estDdp: integer('est_ddp_paisa'),
-		/** Computed estimate: RMB price × FX + kg × DDP (PKR price as-is). */
+		/** Computed estimate: RMB price × FX + kg × transport rate (PKR price as-is). */
 		estCost: integer('est_cost_paisa'),
 		/** Owner confirmed the Shopify "cost per item" is a correct landed cost. */
 		shopifyCostOk: integer('shopify_cost_ok', { mode: 'boolean' }).notNull().default(false),
@@ -89,7 +89,7 @@ export const costHistory = sqliteTable('cost_history', {
 	createdAt: createdAt()
 });
 
-// ─── Imports from China (DDP) ──────────────────────────────────────────────────
+// ─── Purchases (China imports and local buys) ──────────────────────────────────────────────────
 
 export const importBatches = sqliteTable('import_batches', {
 	id: id(),
@@ -100,9 +100,9 @@ export const importBatches = sqliteTable('import_batches', {
 		.default('RMB'),
 	fxRateX10000: integer('fx_rate_x10000').notNull().default(0), // PKR per 1 unit × 10^4
 	ddpRatePerKg: money('ddp_rate_per_kg_paisa'),
-	/** Actual box weight the forwarder billed (grams). null = DDP pending. */
+	/** Actual box weight the forwarder billed (grams). null = transport pending. */
 	billedWeightG: integer('billed_weight_g'),
-	/** Invoice DDP total if it differs from weight × rate (paisa). */
+	/** Fixed transport bill (paisa); null = per kg (billed weight × rate). */
 	ddpTotal: integer('ddp_total_paisa'),
 	/** Fixed bill: share it by item weight or by goods value (null = weight). */
 	transportSplit: text('transport_split', { enum: ['weight', 'value'] }),
