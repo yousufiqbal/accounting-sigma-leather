@@ -9,6 +9,7 @@
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Table from '#lib/components/ui/table/index.js';
 	import Money from '#lib/components/app/money.svelte';
+	import MonthBars from '#lib/components/app/month-bars.svelte';
 	import Stat from '#lib/components/app/stat.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
 	import { formatPct, formatRs } from '#lib/money.js';
@@ -152,6 +153,25 @@
 		}))
 	);
 	let byMonth = $state(false);
+	/** Chart above the By-month table: which line to plot. */
+	const CHART = [
+		{ key: 'np', label: 'Net profit' },
+		{ key: 'gp', label: 'Gross profit' },
+		{ key: 'net', label: 'Net sales' }
+	] as const;
+	let chartKey = $state<(typeof CHART)[number]['key']>('np');
+	const chartPoints = $derived(
+		monthCols.map((c) => {
+			const v = c.values.get(chartKey) ?? 0;
+			const sales = c.values.get('net') ?? 0;
+			return {
+				key: c.month,
+				label: shortMonth(c.month),
+				value: v,
+				note: chartKey !== 'net' && sales > 0 ? `${formatPct(v / sales)} of net sales` : undefined
+			};
+		})
+	);
 	const shortMonth = (m: string) =>
 		new Date(`${m}-01T00:00:00Z`).toLocaleString('en-GB', {
 			month: 'short',
@@ -336,6 +356,26 @@
 		</Stat>
 		<Stat label="Courier cost per order">{formatRs(p.kpi.courierPerOrder)}</Stat>
 	</div>
+
+	{#if byMonth && monthCols.length}
+		<Card.Root>
+			<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
+				<Card.Title>{CHART.find((c) => c.key === chartKey)?.label} by month</Card.Title>
+				<div class="flex gap-1">
+					{#each CHART as c (c.key)}
+						<Button
+							size="xs"
+							variant={chartKey === c.key ? 'secondary' : 'ghost'}
+							onclick={() => (chartKey = c.key)}>{c.label}</Button
+						>
+					{/each}
+				</div>
+			</Card.Header>
+			<Card.Content>
+				<MonthBars points={chartPoints} name={CHART.find((c) => c.key === chartKey)?.label ?? ''} />
+			</Card.Content>
+		</Card.Root>
+	{/if}
 
 	<div
 		class={[
