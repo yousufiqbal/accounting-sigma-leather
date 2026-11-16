@@ -149,7 +149,9 @@ export function parseDex(grid: Grid): ParsedFile {
 			const isDelivered = /^delivered$/i.test(finalStatus);
 			const isReturned = /return/i.test(finalStatus);
 			if (!isDelivered && !isReturned) {
-				errors.push(`${tracking}: unknown final status "${finalStatus}" — not imported (tell the developer how to treat it)`);
+				errors.push(
+					`${tracking}: unknown final status "${finalStatus}" — not imported (tell the developer how to treat it)`
+				);
 				continue;
 			}
 

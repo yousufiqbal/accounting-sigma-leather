@@ -17,7 +17,13 @@
 		id = 'variant-picker',
 		placeholder = 'Type product name or SKU…',
 		value = $bindable('')
-	}: { options: PickerOption[]; name?: string; id?: string; placeholder?: string; value?: string } = $props();
+	}: {
+		options: PickerOption[];
+		name?: string;
+		id?: string;
+		placeholder?: string;
+		value?: string;
+	} = $props();
 
 	let query = $state('');
 	let open = $state(false);
@@ -92,7 +98,10 @@
 
 <div class="relative">
 	<input type="hidden" {name} {value} />
-	<div bind:this={box} class="flex items-center gap-2 rounded-md border bg-background pl-1.5 focus-within:ring-2 focus-within:ring-ring/50">
+	<div
+		bind:this={box}
+		class="flex items-center gap-2 rounded-md border bg-background pl-1.5 focus-within:ring-2 focus-within:ring-ring/50"
+	>
 		<Thumb src={selected?.image} alt={selected ? label(selected) : ''} size={26} zoom={false} />
 		<input
 			bind:this={input}
@@ -130,7 +139,10 @@
 				<li role="option" aria-selected={i === active}>
 					<button
 						type="button"
-						class={['flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left', i === active ? 'bg-accent' : 'hover:bg-accent/60']}
+						class={[
+							'flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left',
+							i === active ? 'bg-accent' : 'hover:bg-accent/60'
+						]}
 						onmousedown={(e) => e.preventDefault()}
 						onclick={() => choose(o)}
 						onmouseenter={() => (active = i)}
@@ -138,7 +150,9 @@
 						<Thumb src={o.image} alt={label(o)} size={32} zoom={false} />
 						<span class="grid min-w-0">
 							<span class="truncate">{o.title}</span>
-							<span class="truncate text-xs text-muted-foreground">{o.variant ?? ''}{o.variant && o.sku ? ' · ' : ''}{o.sku ?? ''}</span>
+							<span class="truncate text-xs text-muted-foreground"
+								>{o.variant ?? ''}{o.variant && o.sku ? ' · ' : ''}{o.sku ?? ''}</span
+							>
 						</span>
 					</button>
 				</li>

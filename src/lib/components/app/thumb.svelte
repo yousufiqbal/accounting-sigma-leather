@@ -1,13 +1,21 @@
 <script lang="ts">
 	import ImageOff from '@lucide/svelte/icons/image-off';
-	import { openLightbox, sizedImage } from '#lib/lightbox.svelte.js';
+	import { openFromThumb, sizedImage } from '#lib/lightbox.svelte.js';
 
 	let {
 		src,
 		alt = '',
 		size = 36,
-		zoom = true
-	}: { src: string | null | undefined; alt?: string; size?: number; zoom?: boolean } = $props();
+		zoom = true,
+		caption
+	}: {
+		src: string | null | undefined;
+		alt?: string;
+		size?: number;
+		zoom?: boolean;
+		/** Extra line in the big view, e.g. "Qty 10". */
+		caption?: string;
+	} = $props();
 </script>
 
 {#if src}
@@ -18,9 +26,12 @@
 			style:width="{size}px"
 			style:height="{size}px"
 			title="View image"
+			data-lb-src={src}
+			data-lb-title={alt}
+			data-lb-caption={caption}
 			onclick={(e) => {
 				e.stopPropagation();
-				openLightbox(src, alt);
+				openFromThumb(e.currentTarget);
 			}}
 		>
 			<img src={sizedImage(src, size * 2)} {alt} loading="lazy" class="size-full object-cover" />

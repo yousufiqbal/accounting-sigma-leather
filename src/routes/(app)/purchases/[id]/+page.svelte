@@ -2,10 +2,14 @@
 	import { formAction } from '#lib/form-action.js';
 	import { ask, notice } from '#lib/confirm.svelte.js';
 	import Thumb from '#lib/components/app/thumb.svelte';
-	import VariantPicker from '#lib/components/app/variant-picker.svelte';
+	import ProductPickerDialog from '#lib/components/app/product-picker-dialog.svelte';
+	import Plus from '@lucide/svelte/icons/plus';
 	import { enhance } from '$app/forms';
+	import { beforeNavigate, goto } from '$app/navigation';
+	import { tick } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
+	import Pencil from '@lucide/svelte/icons/pencil';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '#lib/components/ui/button/index.js';
@@ -14,7 +18,6 @@
 	import * as Table from '#lib/components/ui/table/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
-	import { Textarea } from '#lib/components/ui/textarea/index.js';
 	import Money from '#lib/components/app/money.svelte';
 	import Stat from '#lib/components/app/stat.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
@@ -35,8 +38,10 @@
 
 	let edits = $state<Record<string, Edit>>({});
 	let busy = $state<string | null>(null);
-	let showPaste = $state(false);
-	let pickedVariant = $state('');
+	let pickerOpen = $state(false);
+	let addForm = $state<HTMLFormElement>();
+	let addIds = $state('[]');
+	const onPurchase = $derived(new Set(data.lines.map((l) => l.variantId)));
 
 	/** Shipment transport inputs: saved values unless the user is editing. */
 	type ShipMode = 'perkg' | 'fixed';
@@ -48,7 +53,8 @@
 			data.shipment.fixed && data.shipment.ddpTotal !== null
 				? String(data.shipment.ddpTotal / 100)
 				: '',
-		split: data.shipment.splitChosen
+		split: data.shipment.splitChosen,
+		china: b.chinaShipMinor ? String(b.chinaShipMinor / 100) : ''
 	});
 	let shipEdit = $state<{
 		mode: ShipMode;
@@ -56,6 +62,7 @@
 		rate: string;
 		bill: string;
 		split: 'weight' | 'value';
+		china: string;
 	} | null>(null);
 	const ship = $derived(shipEdit ?? shipSaved);
 	const num = (x: string) => (x.trim() === '' ? null : Number(x.replace(/,/g, '')));
@@ -83,6 +90,7 @@
 	const shipDirty = $derived(
 		shipEdit !== null &&
 			(shipEdit.mode !== shipSaved.mode ||
+				(num(shipEdit.china) ?? 0) !== (num(shipSaved.china) ?? 0) ||
 				(shipEdit.mode === 'fixed'
 					? num(shipEdit.bill) !== num(shipSaved.bill) || shipEdit.split !== shipSaved.split
 					: num(shipEdit.kg) !== num(shipSaved.kg) || num(shipEdit.rate) !== num(shipSaved.rate)))
@@ -143,6 +151,48 @@
 		})
 	);
 	const arriveOk = $derived(arriveTyped.trim() === String(data.totals.units));
+	/** Purchase details: shown as text, a form only after Edit. */
+	let editingHeader = $state(false);
+	/** Items total in the supplier's currency (fen / paisa). */
+	const itemsForeign = $derived(
+		data.lines.reduce((t, l) => t + l.unitPriceForeignMinor * l.qty, 0)
+	);
+	/** Items table: Enter → same column, next row (Shift+Enter → previous row). */
+	function nextRow(ev: KeyboardEvent) {
+		if (ev.key !== 'Enter') return;
+		ev.preventDefault();
+		const el = ev.currentTarget as HTMLInputElement;
+		const col = el.dataset.col;
+		const all = [
+			...(el.closest('table')?.querySelectorAll<HTMLInputElement>(`input[data-col="${col}"]`) ?? [])
+		];
+		const next = all[all.indexOf(el) + (ev.shiftKey ? -1 : 1)];
+		if (next) {
+			next.focus();
+			next.select();
+		}
+	}
+	/**
+	 * Unsaved item or transport changes: closing/reloading the tab asks first (browser prompt),
+	 * and leaving to another page in the panel asks with our own dialog.
+	 */
+	const unsaved = $derived(!!dirty || shipDirty);
+	let leaving = false;
+	beforeNavigate(({ cancel, to, type }) => {
+		if (!unsaved || leaving) return;
+		cancel(); // on tab close / reload this shows the browser's own "Leave site?" prompt
+		if (type === 'leave' || !to) return;
+		ask({
+			title: 'Leave without saving?',
+			description: 'Your item or transport changes on this purchase are not saved yet.',
+			confirmLabel: 'Leave',
+			destructive: true
+		}).then((ok) => {
+			if (!ok) return;
+			leaving = true;
+			goto(to.url);
+		});
+	});
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -247,9 +297,9 @@
 						/>
 						<Button
 							type="submit"
-							disabled={!!busy || !data.lines.length || data.shipment.ddpPending}
-							title={data.shipment.ddpPending
-								? 'Enter the billed box weight under Transport first'
+							disabled={!!busy || !data.lines.length || !data.shipment.transportSet}
+							title={!data.shipment.transportSet
+								? 'Enter the transport first (per kg or fixed bill)'
 								: undefined}
 						>
 							{busy === 'land' ? 'Adding to stock…' : 'Mark arrived — add to stock'}
@@ -260,8 +310,92 @@
 		{/if}
 	</div>
 
+	<Card.Root size="sm">
+		<Card.Content>
+			{#if !editingHeader}
+				<div class="flex flex-wrap items-start gap-x-8 gap-y-3 text-sm">
+					{#each [['Name', b.ref], ['Supplier', b.supplier], ...(isRmb ? [['Rs per 1 yuan', String(b.fxRateX10000 / 10_000)]] : []), ['Notes', b.notes]] as [label, value] (label)}
+						<div class={['grid gap-0.5', label === 'Notes' && 'min-w-0 flex-1']}>
+							<span class="text-xs text-muted-foreground">{label}</span>
+							<span class={['font-medium', !value && 'text-muted-foreground']}>{value || '—'}</span>
+						</div>
+					{/each}
+					{#if !locked}
+						<Button variant="ghost" size="sm" class="ml-auto" onclick={() => (editingHeader = true)}
+							><Pencil /> Edit</Button
+						>
+					{/if}
+				</div>
+			{:else}
+				<form
+					method="POST"
+					action={formAction('header')}
+					use:enhance={act('header', () => (editingHeader = false))}
+					class="flex flex-wrap items-end gap-3"
+				>
+					<fieldset disabled={locked} class="contents">
+						<div class="grid gap-1.5">
+							<Label for="ref">Name</Label><Input id="ref" name="ref" value={b.ref} class="w-48" />
+						</div>
+						<div class="grid gap-1.5">
+							<Label for="supplier">Supplier</Label><Input
+								id="supplier"
+								name="supplier"
+								value={b.supplier ?? ''}
+								class="w-44"
+							/>
+						</div>
+						{#if isRmb}
+							<div class="grid gap-1.5">
+								<Label for="fx">Rs per 1 yuan</Label><Input
+									id="fx"
+									name="fx"
+									inputmode="decimal"
+									value={b.fxRateX10000 / 10_000}
+									class="w-28"
+								/>
+							</div>
+						{/if}
+						<div class="grid min-w-48 flex-1 gap-1.5">
+							<Label for="notes">Notes</Label><Input
+								id="notes"
+								name="notes"
+								value={b.notes ?? ''}
+							/>
+						</div>
+						{#if !locked}
+							<div class="flex gap-2">
+								<Button type="button" variant="ghost" onclick={() => (editingHeader = false)}
+									>Cancel</Button
+								>
+								<Button type="submit" disabled={!!busy}>Save</Button>
+							</div>
+						{/if}
+					</fieldset>
+				</form>
+			{/if}
+		</Card.Content>
+	</Card.Root>
+
 	<div class="grid grid-cols-2 gap-3 md:grid-cols-5">
-		<Stat label="Units">{data.totals.units.toLocaleString('en-PK')}</Stat>
+		<Stat
+			label="Units"
+			hint="{data.lines.length} {data.lines.length === 1 ? 'product' : 'products'}"
+			>{data.totals.units.toLocaleString('en-PK')}</Stat
+		>
+		<Stat label="Goods" hint={isRmb ? `= ${formatRs(data.totals.goods)}` : undefined}
+			>{isRmb
+				? `¥${(itemsForeign / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`
+				: formatRs(data.totals.goods)}</Stat
+		>
+		<Stat
+			label="Transport"
+			hint={isRmb
+				? b.chinaShipMinor
+					? `incl. China shipping ¥${b.chinaShipMinor / 100} (${formatRs(data.totals.china)})`
+					: 'China shipping: not entered'
+				: undefined}>{formatRs(data.totals.ddp + data.totals.extra)}</Stat
+		>
 		<Stat
 			label="Item weight"
 			hint={data.shipment.billedWeightG !== null
@@ -270,107 +404,29 @@
 		>
 			{(data.totals.weightG / 1000).toFixed(1)} kg
 		</Stat>
-		<Stat label="Goods">{formatRs(data.totals.goods)}</Stat>
-		<Stat label="Transport">{formatRs(data.totals.ddp + data.totals.extra)}</Stat>
 		<Stat label="Landed total">{formatRs(data.totals.landed)}</Stat>
 	</div>
-
-	<Card.Root size="sm">
-		<Card.Content>
-			<form
-				method="POST"
-				action={formAction('header')}
-				use:enhance={act('header')}
-				class="flex flex-wrap items-end gap-3"
-			>
-				<fieldset disabled={locked} class="contents">
-					<div class="grid gap-1.5">
-						<Label for="ref">Name</Label><Input id="ref" name="ref" value={b.ref} class="w-48" />
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="supplier">Supplier</Label><Input
-							id="supplier"
-							name="supplier"
-							value={b.supplier ?? ''}
-							class="w-44"
-						/>
-					</div>
-					{#if isRmb}
-						<div class="grid gap-1.5">
-							<Label for="fx">Rs per 1 yuan</Label><Input
-								id="fx"
-								name="fx"
-								inputmode="decimal"
-								value={b.fxRateX10000 / 10_000}
-								class="w-28"
-							/>
-						</div>
-					{/if}
-					<div class="grid min-w-48 flex-1 gap-1.5">
-						<Label for="notes">Notes</Label><Input id="notes" name="notes" value={b.notes ?? ''} />
-					</div>
-					{#if !locked}<Button type="submit" variant="outline" disabled={!!busy}>Save</Button>{/if}
-				</fieldset>
-			</form>
-		</Card.Content>
-	</Card.Root>
 
 	<Card.Root>
 		<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
 			<div>
 				<Card.Title>Items</Card.Title>
-				<Card.Description>
-					Landed per piece = price{isRmb ? ' × rate' : ''} + transport share (see Transport below).
-				</Card.Description>
 			</div>
 			{#if !locked}
-				<Button size="sm" variant="ghost" onclick={() => (showPaste = !showPaste)}>
-					{showPaste ? 'Close paste' : 'Paste many lines'}
-				</Button>
-			{/if}
-		</Card.Header>
-		{#if !locked}
-			<Card.Content class="grid gap-3">
+				<Button onclick={() => (pickerOpen = true)}><Plus /> Add products</Button>
 				<form
 					method="POST"
-					action={formAction('add')}
-					use:enhance={act('add', () => (pickedVariant = ''))}
-					class="flex flex-wrap items-end gap-2"
+					action={formAction('addMany')}
+					bind:this={addForm}
+					use:enhance={act('addMany', () => (pickerOpen = false))}
+					class="hidden"
 				>
-					<div class="grid min-w-72 flex-1 gap-1.5">
-						<Label for="variant-picker">Product</Label>
-						<VariantPicker options={data.options} bind:value={pickedVariant} />
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="qty">Qty</Label>
-						<Input id="qty" name="qty" inputmode="numeric" class="w-20" />
-					</div>
-					<div class="grid gap-1.5">
-						<Label for="price">Price / piece ({sym})</Label>
-						<Input id="price" name="price" inputmode="decimal" class="w-28" />
-					</div>
-					<Button type="submit" variant="outline" disabled={!!busy}>Add</Button>
+					<input type="hidden" name="ids" value={addIds} />
 				</form>
-				{#if showPaste}
-					<form
-						method="POST"
-						action={formAction('paste')}
-						use:enhance={act('paste', () => (showPaste = false))}
-						class="grid gap-2"
-					>
-						<Textarea
-							name="lines"
-							rows={6}
-							class="font-mono text-sm"
-							placeholder={'SKU, qty, price — one per line (copy from Excel works)\nSL-WALLET-BLK, 50, 18.5'}
-						/>
-						<div><Button type="submit" size="sm" disabled={!!busy}>Add lines</Button></div>
-					</form>
-				{/if}
-			</Card.Content>
-		{/if}
+			{/if}
+		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
-			<Table.Root>
+			<Table.Root sticky>
 				<Table.Header>
 					<Table.Row>
 						<Table.Head class="pl-6">Product</Table.Head>
@@ -392,7 +448,8 @@
 								<div class="flex items-center gap-3">
 									<Thumb
 										src={l.variant?.imageUrl}
-										alt={`${l.variant?.productTitle ?? ''} ${l.variant?.variantTitle ?? ''}`}
+										alt={`${l.variant?.productTitle ?? ''}${l.variant?.variantTitle ? ` · ${l.variant.variantTitle}` : ''}`}
+										caption="Qty {l.qty}"
 									/>
 									<div class="min-w-0">
 										<div class="truncate font-medium">
@@ -416,10 +473,17 @@
 								<Table.Cell class="text-right">
 									<Input
 										value={e.qty}
-										oninput={(ev) => set(l, { qty: ev.currentTarget.value })}
+										oninput={(ev) => {
+											// Whole pieces only: drop anything that isn't a digit.
+											const clean = ev.currentTarget.value.replace(/[^0-9]/g, '');
+											if (clean !== ev.currentTarget.value) ev.currentTarget.value = clean;
+											set(l, { qty: clean });
+										}}
 										inputmode="numeric"
 										class="ml-auto h-8 w-16 text-right"
 										aria-label="Quantity"
+										data-col="qty"
+										onkeydown={nextRow}
 									/>
 								</Table.Cell>
 								<Table.Cell class="text-right">
@@ -429,15 +493,19 @@
 										inputmode="decimal"
 										class="ml-auto h-8 w-20 text-right"
 										aria-label="Price"
+										data-col="price"
+										onkeydown={nextRow}
 									/>
 								</Table.Cell>
 								<Table.Cell class="text-right">
 									<Input
 										value={e.weight}
 										oninput={(ev) => set(l, { weight: ev.currentTarget.value })}
-										inputmode="numeric"
+										inputmode="decimal"
 										class={['ml-auto h-8 w-20 text-right', !l.unitWeightG && 'border-danger']}
 										aria-label="Weight in grams"
+										data-col="weight"
+										onkeydown={nextRow}
 									/>
 								</Table.Cell>
 							{/if}
@@ -486,7 +554,7 @@
 		</Card.Content>
 	</Card.Root>
 
-	<Card.Root class={data.shipment.ddpPending && !locked ? 'border-warning/40' : ''}>
+	<Card.Root class={!data.shipment.transportSet && !locked ? 'border-warning/40' : ''}>
 		<Card.Header>
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<Card.Title>Transport</Card.Title>
@@ -495,6 +563,8 @@
 						<StatusBadge tone="warning" label="Not applied yet" />
 					{:else if data.shipment.ddpPending}
 						<StatusBadge tone="warning" label="Pending — enter box weight" />
+					{:else if !data.shipment.transportSet}
+						<StatusBadge tone="warning" label="Required before arrival" />
 					{:else}
 						<span class="flex items-center gap-1.5 text-sm text-success"
 							><CircleCheck class="size-4" /> Applied to items</span
@@ -513,6 +583,34 @@
 				<fieldset disabled={locked} class="contents">
 					<input type="hidden" name="mode" value={ship.mode} />
 					<input type="hidden" name="split" value={ship.split} />
+
+					{#if isRmb}
+						<div class="grid gap-1.5">
+							<Label for="china"
+								>China shipping (¥) <span class="font-normal text-muted-foreground"
+									>— supplier → forwarder, optional</span
+								></Label
+							>
+							<div class="flex items-center gap-3">
+								<Input
+									id="china"
+									name="china"
+									inputmode="decimal"
+									class="w-32"
+									value={ship.china}
+									oninput={(ev) => (shipEdit = { ...ship, china: ev.currentTarget.value })}
+									placeholder="e.g. 25"
+								/>
+								{#if num(ship.china)}
+									<span class="num text-sm text-muted-foreground"
+										>= {formatRs(Math.round(((num(ship.china) ?? 0) * b.fxRateX10000) / 100))}</span
+									>
+								{/if}
+							</div>
+						</div>
+					{:else}
+						<input type="hidden" name="china" value="" />
+					{/if}
 
 					<div class="grid gap-1.5">
 						<span class="text-sm font-medium">How was transport charged?</span>
@@ -598,8 +696,8 @@
 							<div>
 								{#if live.total === null}
 									<span class="text-warning"
-										>~{formatRs(data.totals.ddp)} estimated from item weights — enter the billed box weight
-										when the boxes arrive</span
+										>~{formatRs(data.totals.ddp - data.totals.china)} estimated from item weights — enter
+										the billed box weight when the boxes arrive</span
 									>
 								{:else if live.total === 0}
 									No transport on this purchase.
@@ -608,6 +706,15 @@
 									<b>{live.split === 'value' ? 'price' : 'weight'}</b>
 								{/if}
 							</div>
+							{#if isRmb && num(ship.china)}
+								<div>
+									+ <b class="num">¥{num(ship.china)}</b> China shipping
+									<span class="text-muted-foreground"
+										>(= {formatRs(Math.round(((num(ship.china) ?? 0) * b.fxRateX10000) / 100))}),
+										shared by {data.shipment.itemsWithoutWeight ? 'price' : 'weight'}</span
+									>
+								</div>
+							{/if}
 							{#if live.fallback}
 								<div class="text-xs text-warning">
 									{data.shipment.itemsWithoutWeight} items have no weight, so it's shared by price.
@@ -757,6 +864,18 @@
 			</Dialog.Footer>
 		</Dialog.Content>
 	</Dialog.Root>
+
+	<ProductPickerDialog
+		bind:open={pickerOpen}
+		options={data.options}
+		existing={onPurchase}
+		busy={busy === 'addMany'}
+		onadd={async (ids) => {
+			addIds = JSON.stringify(ids);
+			await tick();
+			addForm?.requestSubmit();
+		}}
+	/>
 
 	{#snippet segmented(options: [string, string][], value: string, pick: (v: string) => void)}
 		<div class="flex h-9 items-center rounded-md border p-0.5">

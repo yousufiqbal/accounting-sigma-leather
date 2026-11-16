@@ -201,7 +201,11 @@
 						<Table.Row>
 							<Table.Cell class={['max-w-96 pl-6', groups[i].grouped && 'pl-12']}>
 								<div class="flex items-center gap-3">
-									<Thumb src={r.imageUrl} alt={`${r.productTitle} ${r.variantTitle ?? ''}`} />
+									<Thumb
+										src={r.imageUrl}
+										alt={`${r.productTitle}${r.variantTitle ? ` · ${r.variantTitle}` : ''}`}
+										caption="{r.onHand ?? 0} on hand"
+									/>
 									<div class="min-w-0">
 										{#if groups[i].grouped}
 											<div class="truncate">{r.variantTitle ?? 'Default'}</div>

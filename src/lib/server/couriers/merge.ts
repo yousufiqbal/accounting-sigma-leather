@@ -157,7 +157,12 @@ export function mergeOne(
 		if (inc.orderName) {
 			set('orderName', inc.orderName);
 			// Courier corrected the order number: drop the old link, linkShipmentsToOrders re-links.
-			if (existing.orderName && inc.orderName !== existing.orderName && existing.orderId && !inc.orderId) {
+			if (
+				existing.orderName &&
+				inc.orderName !== existing.orderName &&
+				existing.orderId &&
+				!inc.orderId
+			) {
 				set('orderId', null as never);
 				set('matchStatus', 'unmatched');
 			}

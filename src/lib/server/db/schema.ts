@@ -106,6 +106,8 @@ export const importBatches = sqliteTable('import_batches', {
 	ddpTotal: integer('ddp_total_paisa'),
 	/** Fixed bill: share it by item weight or by goods value (null = weight). */
 	transportSplit: text('transport_split', { enum: ['weight', 'value'] }),
+	/** Yuan purchases: supplier → forwarder shipping inside China (fen); null = none. */
+	chinaShipMinor: integer('china_ship_minor'),
 	status: text('status', { enum: ['draft', 'paid', 'landing', 'landed'] })
 		.notNull()
 		.default('draft'),

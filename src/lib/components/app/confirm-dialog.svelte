@@ -26,8 +26,13 @@
 			</Dialog.Header>
 			<Dialog.Footer>
 				{#if c.kind === 'ask'}
-					<Button variant="outline" onclick={() => confirmState.settle(false)}>{c.cancelLabel ?? 'Cancel'}</Button>
-					<Button variant={c.destructive ? 'destructive' : 'default'} onclick={() => confirmState.settle(true)}>
+					<Button variant="outline" onclick={() => confirmState.settle(false)}
+						>{c.cancelLabel ?? 'Cancel'}</Button
+					>
+					<Button
+						variant={c.destructive ? 'destructive' : 'default'}
+						onclick={() => confirmState.settle(true)}
+					>
 						{c.confirmLabel ?? 'Confirm'}
 					</Button>
 				{:else}

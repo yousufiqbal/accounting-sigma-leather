@@ -1,5 +1,5 @@
 import { error, fail, redirect } from '@sveltejs/kit';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import { landBatch, loadBatch } from '#lib/server/stock.js';
@@ -35,6 +35,7 @@ export const load: PageServerLoad = async ({ params }) => {
 	const options = await db
 		.select({
 			id: v.id,
+			productId: v.productId,
 			productTitle: v.productTitle,
 			variantTitle: v.variantTitle,
 			sku: v.sku,
@@ -61,6 +62,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			.filter((o) => o.status === 'ACTIVE' && !o.isBundle)
 			.map((o) => ({
 				id: o.id,
+				productId: o.productId,
 				title: o.productTitle,
 				variant: o.variantTitle,
 				sku: o.sku,
@@ -147,6 +149,13 @@ export const actions: Actions = {
 			if (!Number.isFinite(n) || n < 0) throw new Error(k);
 			return n;
 		};
+		let china: number | null;
+		try {
+			china = num('china');
+		} catch {
+			return fail(400, { error: 'China shipping must be a number.' });
+		}
+		const chinaShipMinor = china ? Math.round(china * 100) : null;
 		if (f.get('mode') === 'fixed') {
 			let bill: number | null;
 			try {
@@ -159,7 +168,8 @@ export const actions: Actions = {
 				.update(schema.importBatches)
 				.set({
 					ddpTotal: Math.round(bill * 100),
-					transportSplit: f.get('split') === 'value' ? 'value' : 'weight'
+					transportSplit: f.get('split') === 'value' ? 'value' : 'weight',
+					chinaShipMinor
 				})
 				.where(eq(schema.importBatches.id, params.id));
 			return { saved: 'Transport bill saved and split across items.' };
@@ -176,7 +186,8 @@ export const actions: Actions = {
 			.set({
 				billedWeightG: kg === null ? null : Math.round(kg * 1000),
 				ddpRatePerKg: Math.round((rate ?? 0) * 100),
-				ddpTotal: null
+				ddpTotal: null,
+				chinaShipMinor
 			})
 			.where(eq(schema.importBatches.id, params.id));
 		return {
@@ -187,58 +198,56 @@ export const actions: Actions = {
 		};
 	},
 
-	add: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
-		const f = await request.formData();
-		const id = String(f.get('variantId') ?? '').trim() || undefined;
-		const qty = Math.trunc(Number(f.get('qty')));
-		if (!id) return fail(400, { error: 'Pick a product from the list.' });
-		if (!(qty > 0)) return fail(400, { error: 'Quantity must be more than 0.' });
-		let price: number;
+	/**
+	 * Add many variants at once (from the product picker). Quantity starts at 0 — entered in the
+	 * table. Price starts at the last purchase price in this currency, else the opening estimate.
+	 */
+	addMany: async ({ params, request }) => {
+		const batch = await editable(params.id);
+		if (!batch) return fail(400, LANDED);
+		let ids: string[];
 		try {
-			price = Math.abs(toPaisa(String(f.get('price') ?? '')));
+			ids = JSON.parse(String((await request.formData()).get('ids') ?? '[]'));
+			if (!Array.isArray(ids) || !ids.every((x) => typeof x === 'string')) throw new Error();
 		} catch {
-			return fail(400, { error: 'Price must be a number.' });
+			return fail(400, { error: 'Nothing to add.' });
 		}
-		if (!(await addItem(params.id, id, qty, price)))
-			return fail(400, { error: 'Product not found.' });
-		return { added: true }; // quiet: the new line appearing is feedback enough
-	},
-
-	/** Paste lines: "SKU or variant id, qty, price" (comma or tab). */
-	paste: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
-		const text = String((await request.formData()).get('lines') ?? '');
-		const all = await db.select({ id: v.id, sku: v.sku }).from(v);
-		const bySku = new Map(all.filter((x) => x.sku).map((x) => [x.sku!.trim().toLowerCase(), x.id]));
-		const ids = new Set(all.map((x) => x.id));
-		const bad: string[] = [];
-		let added = 0;
-		for (const [n, raw] of text.split(/\r?\n/).entries()) {
-			const line = raw.trim();
-			if (!line) continue;
-			const parts = line.split(/\t|,/).map((p) => p.trim());
-			const key = parts[0] ?? '';
-			const id = ids.has(key) ? key : bySku.get(key.toLowerCase());
-			const qty = Math.trunc(Number(parts[1]));
-			let price = 0;
-			try {
-				price = Math.abs(toPaisa(parts[2] ?? ''));
-			} catch {
-				price = -1;
-			}
-			if (!id || !(qty > 0) || price < 0) {
-				bad.push(`line ${n + 1}`);
-				continue;
-			}
-			await addItem(params.id, id, qty, price);
-			added++;
-		}
-		return bad.length
-			? fail(400, {
-					error: `Added ${added}. Could not read: ${bad.join(', ')} (SKU not found, or qty/price not a number).`
-				})
-			: { saved: `Added ${added} lines.` };
+		const have = new Set(
+			(await db.select({ id: bi.variantId }).from(bi).where(eq(bi.batchId, params.id))).map(
+				(r) => r.id
+			)
+		);
+		const fresh = [...new Set(ids)].filter((id) => !have.has(id));
+		if (!fresh.length) return { saved: 'Already on this purchase.' };
+		const list = JSON.stringify(fresh);
+		const rows = (await db.all(sql`
+			select v.id, coalesce(v.weight_g, 0) as weightG,
+				(select i.unit_price_foreign_minor from batch_items i
+					join import_batches b on b.id = i.batch_id
+					where i.variant_id = v.id and b.currency = ${batch.currency}
+						and i.unit_price_foreign_minor > 0 and b.id != ${params.id}
+					order by coalesce(b.paid_on, b.created_at) desc limit 1) as lastPrice,
+				case when coalesce(v.est_currency, 'RMB') = ${batch.currency} then v.est_cn_price_minor end as estPrice
+			from variants v
+			where v.id in (select value from json_each(${list}))`)) as {
+			id: string;
+			weightG: number;
+			lastPrice: number | null;
+			estPrice: number | null;
+		}[];
+		if (!rows.length) return fail(400, { error: 'Products not found.' });
+		await db.insert(bi).values(
+			rows.map((r) => ({
+				batchId: params.id,
+				variantId: r.id,
+				qty: 0,
+				unitPriceForeignMinor: r.lastPrice ?? r.estPrice ?? 0,
+				unitWeightG: r.weightG
+			}))
+		);
+		return {
+			saved: `Added ${rows.length} ${rows.length === 1 ? 'item' : 'items'} — enter the quantities.`
+		};
 	},
 
 	items: async ({ params, request }) => {
@@ -248,14 +257,18 @@ export const actions: Actions = {
 		try {
 			rows = (JSON.parse(raw) as { id: string; qty: string; price: string; weight: string }[]).map(
 				(r) => {
-					const qty = Math.trunc(Number(r.qty));
-					const weight = Math.trunc(Number(r.weight));
-					if (!(qty > 0) || !(weight >= 0)) throw new Error();
+					// Whole pieces only (0 allowed while filling in; arrival needs every qty above 0).
+					const qty = Number(r.qty);
+					// Grams may have decimals (e.g. 2.5 g), kept to 2 places.
+					const weight = Math.round(Number(r.weight) * 100) / 100;
+					if (!Number.isInteger(qty) || qty < 0 || !(weight >= 0)) throw new Error();
 					return { id: r.id, qty, price: Math.abs(toPaisa(r.price)), weight };
 				}
 			);
 		} catch {
-			return fail(400, { error: 'Quantity, price and weight must be numbers (qty above 0).' });
+			return fail(400, {
+				error: 'Quantity must be a whole number; price and weight must be numbers.'
+			});
 		}
 		if (!rows.length) return { saved: 'Nothing changed.' };
 		const stmts = rows.map((r) =>

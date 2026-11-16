@@ -63,6 +63,8 @@ type Cost = typeof schema.batchCosts.$inferSelect;
  *   transport = either per kg (billed box weight × rate/kg — the China forwarder) or one fixed
  *               bill (e.g. local carriage); before the box weight is known, per-kg transport is
  *               estimated as unit weight × rate and the purchase is "transport pending"
+ *   china     = supplier → forwarder shipping inside China (yuan, at the purchase rate),
+ *               shared by weight (by value if not every item has a weight); counted in transport
  *   extra     = other shipment costs
  * Transport and extras are split by weight (a fixed bill can choose goods value instead). When
  * not every item has a weight, by value — so no item ends up without a share; no value: by pieces.
@@ -101,14 +103,29 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 					? 1 / units
 					: 0;
 
+	const chinaTotal =
+		batch.currency === 'RMB' && batch.chinaShipMinor
+			? goodsCost(batch.chinaShipMinor, 'RMB', fx)
+			: 0;
+	const chinaShare = (it: Item, goods: number) =>
+		allWeighed
+			? it.unitWeightG / itemWeight
+			: goodsTotal > 0
+				? goods / goodsTotal
+				: units > 0
+					? 1 / units
+					: 0;
+
 	const out = items.map((it) => {
 		const goods = goodsCost(it.unitPriceForeignMinor, batch.currency, fx);
-		const ddp =
+		const forwarder =
 			ddpTotal === null
 				? ddpCost(it.unitWeightG, batch.ddpRatePerKg) // estimate until the box is weighed
 				: Math.round(ddpTotal * share(it, goods));
+		const china = Math.round(chinaTotal * chinaShare(it, goods));
+		const ddp = forwarder + china; // the Transport column: both legs
 		const extra = Math.round(extraTotal * share(it, goods));
-		return { ...it, goods, ddp, extra, landed: goods + ddp + extra };
+		return { ...it, goods, china, ddp, extra, landed: goods + ddp + extra };
 	});
 	return {
 		lines: out,
@@ -116,6 +133,8 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 			units: out.reduce((t, l) => t + l.qty, 0),
 			goods: goodsTotal,
 			ddp: out.reduce((t, l) => t + l.ddp * l.qty, 0),
+			/** Of which China shipping (supplier → forwarder). */
+			china: out.reduce((t, l) => t + l.china * l.qty, 0),
 			extra: extraTotal,
 			landed: out.reduce((t, l) => t + l.landed * l.qty, 0),
 			weightG: itemWeight
@@ -126,6 +145,8 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 			ddpPending,
 			/** One fixed transport bill instead of weight × rate. */
 			fixed,
+			/** Transport entered (required before arrival): a fixed bill, or rate + box weight. */
+			transportSet: fixed || (batch.ddpRatePerKg > 0 && billed !== null),
 			/** How transport and extras are shared between items (chosen vs used). */
 			splitChosen,
 			split,
@@ -242,8 +263,8 @@ export async function landBatch(id: string, landedOn: string) {
 	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000)
 		throw new Error('Enter the exchange rate.');
 	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
-	if (b.shipment.ddpPending)
-		throw new Error('Transport pending — enter the billed box weight first.');
+	if (!b.shipment.transportSet)
+		throw new Error('Enter the transport first — per kg (rate and box weight) or a fixed bill.');
 	if (!b.shipment.fixed && b.shipment.ddpTotal && b.shipment.itemsWithoutWeight)
 		throw new Error(
 			`${b.shipment.itemsWithoutWeight} items have no weight, so they would get no transport share. Enter their weights.`
