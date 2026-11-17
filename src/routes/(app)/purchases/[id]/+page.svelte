@@ -159,9 +159,19 @@
 	/** Purchase details: shown as text, a form only after Edit. */
 	let editingHeader = $state(false);
 	/** Items total in the supplier's currency (fen / paisa). */
+	/** Items summary, live while typing (unsaved quantities and prices included). */
+	const liveNum = (x: string) => {
+		const n = Number(x.replace(/,/g, ''));
+		return Number.isFinite(n) ? n : 0;
+	};
+	const liveUnits = $derived(data.lines.reduce((t, l) => t + liveNum(cur(l).qty), 0));
+	/** Supplier-currency total (fen / paisa). */
 	const itemsForeign = $derived(
-		data.lines.reduce((t, l) => t + l.unitPriceForeignMinor * l.qty, 0)
+		Math.round(
+			data.lines.reduce((t, l) => t + liveNum(cur(l).price) * 100 * liveNum(cur(l).qty), 0)
+		)
 	);
+	const liveChina = $derived(isRmb ? (num(ship.china) ?? 0) : 0);
 	/** Items table: Enter → same column, next row (Shift+Enter → previous row). */
 	function nextRow(ev: KeyboardEvent) {
 		if (ev.key !== 'Enter') return;
@@ -422,12 +432,12 @@
 						{productCount === 1 ? 'product' : 'products'} ·
 						{data.lines.length}
 						{data.lines.length === 1 ? 'variant' : 'variants'} ·
-						{data.totals.units.toLocaleString('en-PK')} units ·
+						{liveUnits.toLocaleString('en-PK')} units ·
 						{isRmb
 							? `¥${(itemsForeign / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`
-							: formatRs(data.totals.goods)} items
-						{#if isRmb && b.chinaShipMinor}
-							· ¥{(b.chinaShipMinor / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })} shipping
+							: formatRs(itemsForeign)} items
+						{#if liveChina}
+							· ¥{liveChina.toLocaleString('en-PK', { maximumFractionDigits: 2 })} shipping
 						{/if}
 					{:else}
 						No items yet — add products to start.
@@ -795,7 +805,8 @@
 						<div class="num font-medium">
 							{data.totals.units}
 							<span class="text-xs font-normal text-muted-foreground"
-								>· {productCount} {productCount === 1 ? 'product' : 'products'} · {data.lines.length} variants</span
+								>· {productCount}
+								{productCount === 1 ? 'product' : 'products'} · {data.lines.length} variants</span
 							>
 						</div>
 					</div>
