@@ -165,6 +165,10 @@
 		return Number.isFinite(n) ? n : 0;
 	};
 	const liveUnits = $derived(data.lines.reduce((t, l) => t + liveNum(cur(l).qty), 0));
+	/** Item weight in grams (unit weight × qty), live. */
+	const liveGrams = $derived(
+		data.lines.reduce((t, l) => t + liveNum(cur(l).weight) * liveNum(cur(l).qty), 0)
+	);
 	/** Supplier-currency total (fen / paisa). */
 	const itemsForeign = $derived(
 		Math.round(
@@ -248,11 +252,6 @@
 			: null
 	);
 	const overdue = $derived(b.status === 'paid' && !!expectedOn && expectedOn < today);
-	/** Mark purchased: days box, prefilled from the Restock lead time (air for China). */
-	let markDays = $derived(
-		String(b.expectedDays ?? (b.currency === 'RMB' ? data.lead.airDays : ''))
-	);
-	let markDate = $state(today);
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -299,37 +298,7 @@
 		{#if !locked}
 			<div class="flex flex-wrap items-end gap-2">
 				{#if b.status === 'draft'}
-					<form
-						method="POST"
-						action={formAction('paid')}
-						use:enhance={act('paid')}
-						class="flex items-end gap-2"
-					>
-						<div class="grid gap-1">
-							<Label for="orderedOn" class="text-xs text-muted-foreground">Ordered on</Label>
-							<Input
-								id="orderedOn"
-								type="date"
-								name="date"
-								bind:value={markDate}
-								class="h-9 w-40"
-							/>
-						</div>
-						<div class="grid gap-1">
-							<Label for="markDays" class="text-xs text-muted-foreground"
-								>Expected in (days){#if markDays.trim() && Number.isFinite(Number(markDays)) && markDate}
-									<span class="font-normal">≈ {fmtShort(addDays(markDate, Number(markDays)))}</span
-									>{/if}</Label
-							>
-							<Input
-								id="markDays"
-								name="expectedDays"
-								inputmode="numeric"
-								bind:value={markDays}
-								class="h-9 w-28"
-								placeholder="e.g. {data.lead.airDays}"
-							/>
-						</div>
+					<form method="POST" action={formAction('paid')} use:enhance={act('paid')}>
 						<Button type="submit" disabled={!!busy || !data.lines.length}
 							>{busy === 'paid' ? 'Saving…' : 'Mark purchased'}</Button
 						>
@@ -445,17 +414,15 @@
 								class="w-28"
 							/>
 						</div>
-						{#if b.status === 'paid'}
-							<div class="grid gap-1.5">
-								<Label for="orderedOnEdit">Ordered on</Label><Input
-									id="orderedOnEdit"
-									name="orderedOn"
-									type="date"
-									value={b.paidOn ?? ''}
-									class="w-40"
-								/>
-							</div>
-						{/if}
+						<div class="grid gap-1.5">
+							<Label for="orderedOnEdit">Ordered on</Label><Input
+								id="orderedOnEdit"
+								name="orderedOn"
+								type="date"
+								value={b.paidOn ?? ''}
+								class="w-40"
+							/>
+						</div>
 						<div class="grid min-w-48 flex-1 gap-1.5">
 							<Label for="notes">Notes</Label><Input
 								id="notes"
@@ -495,14 +462,7 @@
 						{productCount}
 						{productCount === 1 ? 'product' : 'products'} ·
 						{data.lines.length}
-						{data.lines.length === 1 ? 'variant' : 'variants'} ·
-						{liveUnits.toLocaleString('en-PK')} units ·
-						{isRmb
-							? `¥${(itemsForeign / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`
-							: formatRs(itemsForeign)} items
-						{#if liveChina}
-							· ¥{liveChina.toLocaleString('en-PK', { maximumFractionDigits: 2 })} shipping
-						{/if}
+						{data.lines.length === 1 ? 'variant' : 'variants'}
 					{:else}
 						No items yet — add products to start.
 					{/if}
@@ -651,6 +611,29 @@
 						</Table.Row>
 					{/each}
 				</Table.Body>
+				{#if data.lines.length}
+					<!-- Column totals (quantity, price and weight follow unsaved edits). -->
+					<Table.Footer>
+						<Table.Row class="font-medium hover:bg-transparent">
+							{#if showSerial}<Table.Cell class="pl-6"></Table.Cell>{/if}
+							<Table.Cell></Table.Cell>
+							<Table.Cell class="num text-right">{liveUnits.toLocaleString('en-PK')}</Table.Cell>
+							<Table.Cell class="num text-right"
+								>{isRmb ? '¥' : 'Rs '}{(itemsForeign / 100).toLocaleString('en-PK', {
+									maximumFractionDigits: 2
+								})}</Table.Cell
+							>
+							<Table.Cell class="num text-right"
+								>{liveGrams.toLocaleString('en-PK', { maximumFractionDigits: 1 })} g</Table.Cell
+							>
+							<Table.Cell></Table.Cell>
+							<Table.Cell></Table.Cell>
+							<Table.Cell></Table.Cell>
+							<Table.Cell></Table.Cell>
+							<Table.Cell></Table.Cell>
+						</Table.Row>
+					</Table.Footer>
+				{/if}
 			</Table.Root>
 		</Card.Content>
 	</Card.Root>

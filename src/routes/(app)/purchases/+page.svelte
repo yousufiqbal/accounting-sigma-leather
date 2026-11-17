@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
+	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import Thumb from '#lib/components/app/thumb.svelte';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
@@ -12,6 +14,7 @@
 	import Money from '#lib/components/app/money.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
 	import { page } from '$app/state';
+	import { formatRs } from '#lib/money.js';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -49,6 +52,14 @@
 		t.setUTCDate(t.getUTCDate() + n);
 		return t.toISOString().slice(0, 10);
 	};
+	/** Purchases whose item list is expanded. */
+	let expanded = $state(new Set<string>());
+	function toggle(id: string) {
+		const next = new Set(expanded);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		expanded = next;
+	}
 </script>
 
 <div class="grid gap-6">
@@ -122,7 +133,18 @@
 										>{/if}
 								</div>
 							</Table.Cell>
-							<Table.Cell class="num text-right">{b.items}</Table.Cell>
+							<Table.Cell class="text-right">
+								<button
+									type="button"
+									class="num inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent"
+									aria-expanded={expanded.has(b.id)}
+									title={expanded.has(b.id) ? 'Hide items' : 'Show items'}
+									onclick={() => toggle(b.id)}
+									>{b.items}<ChevronDown
+										class={['size-3.5 transition-transform', expanded.has(b.id) && 'rotate-180']}
+									/></button
+								>
+							</Table.Cell>
 							<Table.Cell class="num text-right">{b.totals.units}</Table.Cell>
 							<Table.Cell class="num text-right"
 								>{(b.totals.weightG / 1000).toFixed(1)} kg</Table.Cell
@@ -135,6 +157,41 @@
 								><Money paisa={b.totals.landed} /></Table.Cell
 							>
 						</Table.Row>
+						{#if expanded.has(b.id)}
+							<Table.Row class="bg-muted/30 hover:bg-muted/30">
+								<Table.Cell colspan={8} class="px-6 py-3">
+									{#if b.lines.length}
+										<div class="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
+											{#each b.lines as l (l.id)}
+												<div class="flex min-w-0 items-center gap-2.5 text-sm">
+													<Thumb
+														src={l.image}
+														alt={`${l.title}${l.variant ? ` · ${l.variant}` : ''}`}
+														caption="Qty {l.qty}"
+														size={36}
+													/>
+													<div class="min-w-0 flex-1">
+														<div class="truncate" title={l.title}>{l.title}</div>
+														<div class="truncate text-xs text-muted-foreground">
+															{l.variant ? `${l.variant} · ` : ''}{l.qty} ×
+															{b.currency === 'PKR' ? 'Rs ' : '¥'}{(l.price / 100).toLocaleString(
+																'en-PK',
+																{
+																	maximumFractionDigits: 2
+																}
+															)}
+															· landed {formatRs(l.landed)}
+														</div>
+													</div>
+												</div>
+											{/each}
+										</div>
+									{:else}
+										<p class="text-sm text-muted-foreground">No items yet.</p>
+									{/if}
+								</Table.Cell>
+							</Table.Row>
+						{/if}
 					{:else}
 						<Table.Row>
 							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
@@ -197,6 +254,25 @@
 						required
 					/>
 				</div>
+			{/if}
+			{#if currency === 'RMB'}
+				<div class="grid grid-cols-2 gap-3">
+					<div class="grid gap-2">
+						<Label for="orderedOn">Ordered on</Label>
+						<Input id="orderedOn" name="orderedOn" type="date" value={today} />
+					</div>
+					<div class="grid gap-2">
+						<Label for="expectedDays">Expected in (days)</Label>
+						<Input
+							id="expectedDays"
+							name="expectedDays"
+							inputmode="numeric"
+							value={String(data.lead.airDays)}
+						/>
+					</div>
+				</div>
+			{:else}
+				<input type="hidden" name="orderedOn" value={today} />
 			{/if}
 			<div class="grid gap-2">
 				<Label for="ddp">Transport Rs per kg</Label>

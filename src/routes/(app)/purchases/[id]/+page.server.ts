@@ -166,7 +166,7 @@ export const actions: Actions = {
 				notes: String(f.get('notes') ?? '').trim() || null,
 				fxRateX10000: fx,
 				expectedDays,
-				...(batch.status === 'paid' && isDate(orderedOn) ? { paidOn: orderedOn } : {})
+				...(isDate(orderedOn) ? { paidOn: orderedOn } : {})
 			})
 			.where(eq(schema.importBatches.id, params.id));
 		if (batch.status === 'paid') await syncExpectedArrival(await purchaseVariantIds(params.id));
@@ -331,21 +331,14 @@ export const actions: Actions = {
 		return { saved: 'Item removed.' };
 	},
 
-	paid: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
-		const f = await request.formData();
-		const date = String(f.get('date') ?? '');
-		if (!isDate(date)) return fail(400, { error: 'Pick the date you ordered.' });
-		const daysRaw = String(f.get('expectedDays') ?? '').trim();
-		const expectedDays = daysRaw === '' ? null : Number(daysRaw);
-		if (
-			expectedDays !== null &&
-			!(Number.isInteger(expectedDays) && expectedDays >= 0 && expectedDays <= 365)
-		)
-			return fail(400, { error: 'Expected arrival must be whole days (0–365).' });
+	/** Ordered on + expected days were entered when the purchase was created (editable via Edit). */
+	paid: async ({ params }) => {
+		const batch = await editable(params.id);
+		if (!batch) return fail(400, LANDED);
+		const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 		await db
 			.update(schema.importBatches)
-			.set({ status: 'paid', paidOn: date, expectedDays })
+			.set({ status: 'paid', paidOn: batch.paidOn ?? today })
 			.where(eq(schema.importBatches.id, params.id));
 		const sync = await syncExpectedArrival(await purchaseVariantIds(params.id));
 		return {
@@ -360,7 +353,7 @@ export const actions: Actions = {
 		if (!(await editable(params.id))) return fail(400, LANDED);
 		await db
 			.update(schema.importBatches)
-			.set({ status: 'draft', paidOn: null })
+			.set({ status: 'draft' }) // keeps the ordered-on date
 			.where(eq(schema.importBatches.id, params.id));
 		await syncExpectedArrival(await purchaseVariantIds(params.id));
 		return { saved: 'Back to draft — no longer counted as incoming.' };
