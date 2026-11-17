@@ -62,12 +62,6 @@
 			(Date.parse(`${today}T12:00:00Z`) - Date.parse(`${due}T12:00:00Z`)) / 86_400_000
 		);
 	};
-	const late = $derived(
-		data.batches
-			.map((b) => ({ b, days: daysLate(b) }))
-			.filter((x) => x.days > 0)
-			.sort((x, y) => y.days - x.days)
-	);
 	/**
 	 * One thumbnail per variant (its own picture). Variants that
 	 * share the very same picture show it once.
@@ -103,29 +97,6 @@
 		</div>
 		<Button onclick={() => (open = true)}><Plus /> New purchase</Button>
 	</div>
-
-	{#if late.length}
-		<div class="rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
-			<p class="font-medium">
-				{late.length}
-				{late.length === 1 ? 'purchase is' : 'purchases are'} past the expected arrival — contact the
-				forwarder / supplier:
-			</p>
-			<ul class="mt-1.5 grid gap-1">
-				{#each late as { b, days } (b.id)}
-					<li>
-						<a href="/purchases/{b.id}" class="font-medium underline">{b.ref}</a>
-						<span class="text-muted-foreground">
-							{b.supplier ? `· ${b.supplier} ` : ''}· expected {fmtDate(
-								addDays(b.paidOn!, b.expectedDays!)
-							)} ·
-						</span>
-						<span class="font-medium text-warning">{days} {days === 1 ? 'day' : 'days'} late</span>
-					</li>
-				{/each}
-			</ul>
-		</div>
-	{/if}
 
 	<Card.Root>
 		<Card.Header class="pb-0" data-sveltekit-noscroll>
