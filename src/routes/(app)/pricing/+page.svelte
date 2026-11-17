@@ -148,6 +148,14 @@
 		else edits[r.id] = { val, row: r };
 	}
 	const useSuggested = (r: Row) => r.suggested && setEdit(r, String(r.suggested / 100));
+	/** Rows in this tab (and search) whose suggested price differs from the current one. */
+	const suggestable = $derived(data.rows.filter((r) => r.suggested && r.suggested !== r.price));
+	function fillSuggested() {
+		for (const r of suggestable) useSuggested(r);
+		toast.success(
+			`Filled ${suggestable.length} suggested ${suggestable.length === 1 ? 'price' : 'prices'} — review, then update Shopify.`
+		);
+	}
 
 	/** "Price for all" box on a product's header row: same new price on every variant on this page. */
 	let groupVal = $state<Record<string, string>>({});
@@ -196,6 +204,7 @@
 		{ id: 'below', label: `Below target (${data.counts.below})` },
 		{ id: 'losing', label: `Losing money (${data.counts.losing})` },
 		{ id: 'nocost', label: `No cost (${data.counts.nocost})` },
+		{ id: 'noprice', label: `No price (${data.counts.noprice})` },
 		{ id: 'best', label: `Best sellers (${data.counts.best})` }
 	]);
 	let costSheet = $state<CostSheet>();
@@ -243,12 +252,26 @@
 						variant={data.view === view.id ? 'secondary' : 'ghost'}>{view.label}</Button
 					>
 				{/each}
-				<form method="GET" class="w-full sm:ml-auto sm:w-auto" data-sveltekit-keepfocus>
-					{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
-						<input type="hidden" name={k} value={val} />
-					{/each}
-					<Input name="q" value={data.q} placeholder="Product or SKU" class="h-8 w-full sm:w-44" />
-				</form>
+				<div class="flex w-full items-center gap-2 sm:ml-auto sm:w-auto">
+					<form method="GET" class="flex-1 sm:flex-none" data-sveltekit-keepfocus>
+						{#each [...page.url.searchParams].filter(([k]) => k !== 'q' && k !== 'page') as [k, val] (k)}
+							<input type="hidden" name={k} value={val} />
+						{/each}
+						<Input
+							name="q"
+							value={data.q}
+							placeholder="Product or SKU"
+							class="h-8 w-full sm:w-44"
+						/>
+					</form>
+					<Button
+						size="sm"
+						variant="outline"
+						disabled={!suggestable.length}
+						title="Put the suggested price in the New price box of every row in this tab"
+						onclick={fillSuggested}>Fill suggested ({suggestable.length})</Button
+					>
+				</div>
 			</div>
 			{#if data.view === 'nocost'}
 				<Card.Description>

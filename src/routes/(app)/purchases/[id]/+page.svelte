@@ -147,9 +147,14 @@
 				(have * (old ?? l.landed) + l.qty * l.landed) / (have + l.qty || 1)
 			);
 			const change = old ? (newAvg - old) / old : null;
-			return { l, have, old, newAvg, big: change !== null && Math.abs(change) > 0.3 };
+			const weightFrom =
+				l.unitWeightG > 0 && l.variant && l.variant.weightG !== l.unitWeightG
+					? (l.variant.weightG ?? 0)
+					: null;
+			return { l, have, old, newAvg, big: change !== null && Math.abs(change) > 0.3, weightFrom };
 		})
 	);
+	const weightUpdates = $derived(arrivePlan.filter((p) => p.weightFrom !== null).length);
 	const arriveOk = $derived(arriveTyped.trim() === String(data.totals.units));
 	/** Purchase details: shown as text, a form only after Edit. */
 	let editingHeader = $state(false);
@@ -193,6 +198,27 @@
 			goto(to.url);
 		});
 	});
+	/** Serial numbers before the items (remembered on this device). */
+	let showSerial = $state(
+		(() => {
+			try {
+				return localStorage.getItem('purchase-serial') === '1';
+			} catch {
+				return false;
+			}
+		})()
+	);
+	function toggleSerial() {
+		showSerial = !showSerial;
+		try {
+			localStorage.setItem('purchase-serial', showSerial ? '1' : '0');
+		} catch {
+			/* private mode: just this visit */
+		}
+	}
+	const productCount = $derived(
+		new Set(data.lines.map((l) => l.variant?.productId ?? l.variantId)).size
+	);
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -377,40 +403,36 @@
 		</Card.Content>
 	</Card.Root>
 
-	<div class="grid grid-cols-2 gap-3 md:grid-cols-5">
-		<Stat
-			label="Units"
-			hint="{data.lines.length} {data.lines.length === 1 ? 'product' : 'products'}"
-			>{data.totals.units.toLocaleString('en-PK')}</Stat
-		>
-		<Stat label="Goods" hint={isRmb ? `= ${formatRs(data.totals.goods)}` : undefined}
-			>{isRmb
-				? `¥${(itemsForeign / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`
-				: formatRs(data.totals.goods)}</Stat
-		>
-		<Stat
-			label="Transport"
-			hint={isRmb
-				? b.chinaShipMinor
-					? `incl. China shipping ¥${b.chinaShipMinor / 100} (${formatRs(data.totals.china)})`
-					: 'China shipping: not entered'
-				: undefined}>{formatRs(data.totals.ddp + data.totals.extra)}</Stat
-		>
-		<Stat
-			label="Item weight"
-			hint={data.shipment.billedWeightG !== null
-				? `Billed ${(data.shipment.billedWeightG / 1000).toFixed(1)} kg`
-				: 'Box weight not entered'}
-		>
-			{(data.totals.weightG / 1000).toFixed(1)} kg
-		</Stat>
-		<Stat label="Landed total">{formatRs(data.totals.landed)}</Stat>
-	</div>
-
 	<Card.Root>
 		<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
-			<div>
-				<Card.Title>Items</Card.Title>
+			<div class="grid gap-1">
+				<div class="flex items-center gap-2">
+					<Card.Title>Items</Card.Title>
+					<Button
+						size="xs"
+						variant={showSerial ? 'secondary' : 'ghost'}
+						aria-pressed={showSerial}
+						title={showSerial ? 'Hide serial numbers' : 'Show serial numbers'}
+						onclick={toggleSerial}>#</Button
+					>
+				</div>
+				<Card.Description>
+					{#if data.lines.length}
+						{productCount}
+						{productCount === 1 ? 'product' : 'products'} ·
+						{data.lines.length}
+						{data.lines.length === 1 ? 'variant' : 'variants'} ·
+						{data.totals.units.toLocaleString('en-PK')} units ·
+						{isRmb
+							? `¥${(itemsForeign / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })}`
+							: formatRs(data.totals.goods)} items
+						{#if isRmb && b.chinaShipMinor}
+							· ¥{(b.chinaShipMinor / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 })} shipping
+						{/if}
+					{:else}
+						No items yet — add products to start.
+					{/if}
+				</Card.Description>
 			</div>
 			{#if !locked}
 				<Button onclick={() => (pickerOpen = true)}><Plus /> Add products</Button>
@@ -429,7 +451,8 @@
 			<Table.Root sticky>
 				<Table.Header>
 					<Table.Row>
-						<Table.Head class="pl-6">Product</Table.Head>
+						{#if showSerial}<Table.Head class="w-10 pr-0 pl-6 text-right">#</Table.Head>{/if}
+						<Table.Head class={showSerial ? 'pl-3' : 'pl-6'}>Product</Table.Head>
 						<Table.Head class="text-right">Qty</Table.Head>
 						<Table.Head class="text-right">Price ({sym})</Table.Head>
 						<Table.Head class="text-right">Weight (g)</Table.Head>
@@ -441,10 +464,13 @@
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
-					{#each data.lines as l (l.id)}
+					{#each data.lines as l, n (l.id)}
 						{@const e = cur(l)}
 						<Table.Row class={edits[l.id] ? 'bg-warning-soft/40' : ''}>
-							<Table.Cell class="max-w-64 pl-6">
+							{#if showSerial}<Table.Cell
+									class="num w-10 pr-0 pl-6 text-right text-muted-foreground">{n + 1}</Table.Cell
+								>{/if}
+							<Table.Cell class={['max-w-64', showSerial ? 'pl-3' : 'pl-6']}>
 								<div class="flex items-center gap-3">
 									<Thumb
 										src={l.variant?.imageUrl}
@@ -544,8 +570,9 @@
 						</Table.Row>
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={10} class="py-10 text-center text-muted-foreground"
-								>No items yet.</Table.Cell
+							<Table.Cell
+								colspan={showSerial ? 11 : 10}
+								class="py-10 text-center text-muted-foreground">No items yet.</Table.Cell
 							>
 						</Table.Row>
 					{/each}
@@ -768,7 +795,7 @@
 						<div class="num font-medium">
 							{data.totals.units}
 							<span class="text-xs font-normal text-muted-foreground"
-								>· {data.lines.length} {data.lines.length === 1 ? 'product' : 'products'}</span
+								>· {productCount} {productCount === 1 ? 'product' : 'products'} · {data.lines.length} variants</span
 							>
 						</div>
 					</div>
@@ -813,6 +840,9 @@
 													>
 														{p.l.variant.variantTitle}
 													</div>{/if}
+												{#if p.weightFrom !== null}<div class="text-xs text-info">
+														Weight {p.weightFrom || '—'} g → {p.l.unitWeightG} g in Shopify
+													</div>{/if}
 											</div>
 										</div>
 									</td>
@@ -830,6 +860,13 @@
 						</tbody>
 					</table>
 				</div>
+				{#if weightUpdates}
+					<p class="text-xs text-info">
+						{weightUpdates}
+						{weightUpdates === 1 ? 'product weight' : 'product weights'} will be updated in Shopify to
+						the weights on this purchase.
+					</p>
+				{/if}
 				<p class="text-xs text-muted-foreground">
 					New cost = average of the stock you have and this purchase (approximate until it's saved).
 				</p>

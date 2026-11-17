@@ -18,6 +18,7 @@ export const GET: RequestHandler = async () => {
 		.orderBy(
 			desc(sql`max(coalesce(${v.shopifyOnHand}, 0), 0)`),
 			asc(v.productTitle),
+			asc(sql`coalesce(${v.position}, 999999)`),
 			asc(v.variantTitle)
 		);
 	const head = [

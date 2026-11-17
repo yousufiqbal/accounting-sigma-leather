@@ -11,7 +11,7 @@ import {
 } from '#lib/server/pricing.js';
 import type { Actions, PageServerLoad } from './$types';
 
-const VIEWS = ['losing', 'below', 'nocost', 'best', 'all'] as const;
+const VIEWS = ['losing', 'below', 'nocost', 'noprice', 'best', 'all'] as const;
 type View = (typeof VIEWS)[number];
 const v = schema.variants;
 
@@ -37,6 +37,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			imageUrl: v.imageUrl,
 			variantTitle: v.variantTitle,
 			sku: v.sku,
+			position: v.position,
 			price: v.price,
 			cost: v.avgCost,
 			costSource: v.costSource,
@@ -52,7 +53,12 @@ export const load: PageServerLoad = async ({ url }) => {
 		})
 		.from(v)
 		.where(eq(v.status, 'ACTIVE'))
-		.orderBy(asc(v.productTitle), asc(v.variantTitle));
+		.orderBy(
+			asc(v.productTitle),
+			asc(v.productId),
+			asc(sql`coalesce(${v.position}, 999999)`),
+			asc(v.variantTitle)
+		);
 
 	// Units delivered / returned per variant in the window.
 	const sales = (await db.all(sql`
@@ -99,6 +105,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		losing: (r) => r.profit !== null && r.profit < 0,
 		below: (r) => r.margin !== null && r.margin < e.target,
 		nocost: (r) => r.cost <= 0,
+		/** No selling price set in Shopify. */
+		noprice: (r) => r.price <= 0,
 		best: (r) => r.sold > 0,
 		all: () => true
 	};
@@ -120,6 +128,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			(a, b) =>
 				(weight.get(b.productId) ?? 0) - (weight.get(a.productId) ?? 0) ||
 				a.productId.localeCompare(b.productId) ||
+				(a.position ?? 999999) - (b.position ?? 999999) ||
 				(a.variantTitle ?? '').localeCompare(b.variantTitle ?? '')
 		);
 	}

@@ -242,7 +242,7 @@ export async function pushWeights(items: { id: string; weightG: number }[]) {
 		const body = chunk
 			.map(
 				(c, j) =>
-					`m${j}: inventoryItemUpdate(id: "gid://shopify/InventoryItem/${invOf.get(c.id)}", input: { measurement: { weight: { unit: GRAMS, value: ${Math.max(0, Math.round(c.weightG))} } } }) { userErrors { message } }`
+					`m${j}: inventoryItemUpdate(id: "gid://shopify/InventoryItem/${invOf.get(c.id)}", input: { measurement: { weight: { unit: GRAMS, value: ${Math.max(0, Math.round(c.weightG * 100) / 100)} } } }) { userErrors { message } }`
 			)
 			.join('\n');
 		const d = await shopifyGql<Record<string, { userErrors: { message: string }[] }>>(
@@ -258,7 +258,7 @@ export async function pushWeights(items: { id: string; weightG: number }[]) {
 		const stmts = ok.slice(i, i + 100).map((c) =>
 			db
 				.update(v)
-				.set({ weightG: Math.round(c.weightG), updatedAt: now })
+				.set({ weightG: Math.round(c.weightG * 100) / 100, updatedAt: now })
 				.where(eq(v.id, c.id))
 		);
 		await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);

@@ -76,6 +76,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			desc(sql`sum(max(coalesce(${v.shopifyOnHand}, 0), 0)) over (partition by ${v.productId})`),
 			asc(v.productTitle),
 			asc(v.productId),
+			asc(sql`coalesce(${v.position}, 999999)`),
 			asc(v.variantTitle)
 		)
 		.limit(PAGE_SIZE)
@@ -140,7 +141,7 @@ type Input = Parameters<typeof saveCostInputs>[0][number];
 const grams = (s: string) => {
 	const n = Number(String(s).replace(/[,\s]/g, ''));
 	if (!Number.isFinite(n) || n < 0 || n > 100_000) throw new Error('weight');
-	return Math.round(n);
+	return Math.round(n * 100) / 100;
 };
 
 export const actions: Actions = {

@@ -43,6 +43,7 @@ async function logRun<T>(kind: string, fn: () => Promise<T>): Promise<T> {
 
 type VariantNode = {
 	id: string;
+	position: number;
 	requiresComponents: boolean;
 	title: string;
 	sku: string | null;
@@ -65,7 +66,7 @@ type VariantNode = {
 const toGrams = (w: { unit: string; value: number } | null | undefined) => {
 	if (!w) return null;
 	const f = { GRAMS: 1, KILOGRAMS: 1000, OUNCES: 28.3495, POUNDS: 453.592 }[w.unit] ?? 1;
-	return Math.round(w.value * f);
+	return Math.round(w.value * f * 100) / 100; // grams, 2 decimals
 };
 
 /**
@@ -97,7 +98,7 @@ export function syncVariants(stockAnchor?: string) {
 					productVariants(first: 100, after: $after) {
 						pageInfo { hasNextPage endCursor }
 						nodes {
-							id title sku price requiresComponents
+							id title sku price position requiresComponents
 							product { id title status featuredMedia { preview { image { url } } } }
 							media(first: 1) { nodes { preview { image { url } } } }
 							inventoryItem {
@@ -123,6 +124,7 @@ export function syncVariants(stockAnchor?: string) {
 					productId: gidId(v.product.id),
 					productTitle: v.product.title,
 					variantTitle: v.title === 'Default Title' ? null : v.title,
+					position: v.position,
 					sku: v.sku || null,
 					inventoryItemId: gidId(v.inventoryItem.id),
 					status: v.product.status,

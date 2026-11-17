@@ -73,6 +73,7 @@ export const load: PageServerLoad = async ({ url }) => {
 			desc(sql`sum(max(coalesce(${v.shopifyOnHand}, 0), 0)) over (partition by ${v.productId})`),
 			asc(v.productTitle),
 			asc(v.productId),
+			asc(sql`coalesce(${v.position}, 999999)`),
 			asc(v.variantTitle)
 		)
 		.limit(PAGE_SIZE)

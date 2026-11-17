@@ -16,7 +16,7 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db, schema } from './db/index.js';
 import { gidId, shopifyGql } from './shopify.js';
-import { ddpCost, goodsCost } from './costing.js';
+import { ddpCost, goodsCost, pushWeights } from './costing.js';
 
 const v = schema.variants;
 
@@ -90,10 +90,11 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 	/** What the purchase asks for, and what is actually used (weight needs every item's weight). */
 	const splitChosen: 'weight' | 'value' =
 		fixed && batch.transportSplit === 'value' ? 'value' : 'weight';
-	const allWeighed = items.length > 0 && items.every((it) => it.unitWeightG > 0);
+	// Weight split needs every item weighed and some weight on the purchase (qty 0 lines add none).
+	const allWeighed = items.length > 0 && items.every((it) => it.unitWeightG > 0) && itemWeight > 0;
 	const split: 'weight' | 'value' | 'pieces' =
 		splitChosen === 'weight' && allWeighed ? 'weight' : goodsTotal > 0 ? 'value' : 'pieces';
-	/** One piece's share (0–1) of a shipment-wide cost. */
+	/** One piece's share (0–1) of a shipment-wide cost; 0 when there is nothing to share over. */
 	const share = (it: Item, goods: number) =>
 		split === 'weight'
 			? it.unitWeightG / itemWeight
@@ -102,6 +103,7 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 				: units > 0
 					? 1 / units
 					: 0;
+	const safe = (n: number) => (Number.isFinite(n) ? n : 0);
 
 	const chinaTotal =
 		batch.currency === 'RMB' && batch.chinaShipMinor
@@ -121,10 +123,10 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 		const forwarder =
 			ddpTotal === null
 				? ddpCost(it.unitWeightG, batch.ddpRatePerKg) // estimate until the box is weighed
-				: Math.round(ddpTotal * share(it, goods));
-		const china = Math.round(chinaTotal * chinaShare(it, goods));
+				: Math.round(ddpTotal * safe(share(it, goods)));
+		const china = Math.round(chinaTotal * safe(chinaShare(it, goods)));
 		const ddp = forwarder + china; // the Transport column: both legs
-		const extra = Math.round(extraTotal * share(it, goods));
+		const extra = Math.round(extraTotal * safe(share(it, goods)));
 		return { ...it, goods, china, ddp, extra, landed: goods + ddp + extra };
 	});
 	return {
@@ -160,7 +162,12 @@ export function priceBatch(batch: Batch, items: Item[], costs: Cost[]) {
 export async function loadBatch(id: string) {
 	const batch = await db.query.importBatches.findFirst({ where: eq(schema.importBatches.id, id) });
 	if (!batch) return null;
-	const items = await db.select().from(schema.batchItems).where(eq(schema.batchItems.batchId, id));
+	// In the order they were added (SQLite rowid grows with each insert).
+	const items = await db
+		.select()
+		.from(schema.batchItems)
+		.where(eq(schema.batchItems.batchId, id))
+		.orderBy(sql`rowid`);
 	const costs = await db.select().from(schema.batchCosts).where(eq(schema.batchCosts.batchId, id));
 	return { batch, items, costs, ...priceBatch(batch, items, costs) };
 }
@@ -402,7 +409,23 @@ export async function landBatch(id: string, landedOn: string) {
 	stmts.push(db.delete(schema.settings).where(eq(schema.settings.key, snapKey)));
 	// One batch = one transaction: the ledger is never half-written.
 	await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
-	return { items: plan.length, units: b.totals.units, costFailed: costFailed.length };
+
+	// The weights entered on the purchase become the products' weights (Shopify first, then here).
+	// After the stock is in: a failure here never undoes the arrival.
+	const weightChanges = b.lines
+		.filter((l) => l.unitWeightG > 0 && byId.get(l.variantId)?.weightG !== l.unitWeightG)
+		.map((l) => ({ id: l.variantId, weightG: l.unitWeightG }));
+	const w = await pushWeights(weightChanges).catch(() => ({
+		done: 0,
+		failed: weightChanges.length
+	}));
+	return {
+		items: plan.length,
+		units: b.totals.units,
+		costFailed: costFailed.length,
+		weightsDone: w.done,
+		weightsFailed: w.failed
+	};
 }
 
 // ─── Shopify stock check (SPEC.md §5) ──────────────────────────────────────────

@@ -40,6 +40,8 @@ export const variants = sqliteTable(
 		weightG: integer('weight_g'),
 		imageUrl: text('image_url'),
 		/** Shopify bundle (requiresComponents): stock/cost come from its component products. */
+		/** Variant order inside its product, as in Shopify (1, 2, 3…). */
+		position: integer('position'),
 		isBundle: integer('is_bundle', { mode: 'boolean' }), // variant image, else product's main image (Shopify CDN)
 		price: money('price_paisa'),
 		avgCost: money('avg_cost_paisa'),

@@ -99,7 +99,12 @@ export async function startSession() {
 		})
 		.from(v)
 		.where(and(eq(v.status, 'ACTIVE'), eq(v.isBundle, false)))
-		.orderBy(asc(v.productTitle), asc(v.variantTitle));
+		.orderBy(
+			asc(v.productTitle),
+			asc(v.productId),
+			asc(sql`coalesce(${v.position}, 999999)`),
+			asc(v.variantTitle)
+		);
 	const ids = variants.map((x) => x.id);
 	const [sales, stock, lead] = await Promise.all([variantSales(), liveStock(ids), getLead()]);
 	const noStock: LiveStock = { onHand: 0, available: 0, committed: 0, incoming: 0 };

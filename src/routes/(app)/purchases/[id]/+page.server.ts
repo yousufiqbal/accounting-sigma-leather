@@ -8,6 +8,27 @@ import type { Actions, PageServerLoad } from './$types';
 const v = schema.variants;
 const bi = schema.batchItems;
 
+/**
+ * Items as listed on the purchase: the product added most recently first; a product's variants
+ * stay together in Shopify order. `lines` arrive in the order they were added.
+ */
+function newestFirst<
+	L extends {
+		variantId: string;
+		variant: { productId: string; position: number | null; variantTitle: string | null } | null;
+	}
+>(lines: L[]): L[] {
+	const pid = (l: L) => l.variant?.productId ?? l.variantId;
+	const lastAdded = new Map<string, number>();
+	lines.forEach((l, i) => lastAdded.set(pid(l), i));
+	return [...lines].sort(
+		(a, c) =>
+			lastAdded.get(pid(c))! - lastAdded.get(pid(a))! ||
+			(a.variant?.position ?? 999999) - (c.variant?.position ?? 999999) ||
+			(a.variant?.variantTitle ?? '').localeCompare(c.variant?.variantTitle ?? '')
+	);
+}
+
 export const load: PageServerLoad = async ({ params }) => {
 	const b = await loadBatch(params.id);
 	if (!b) error(404, 'Purchase not found');
@@ -21,7 +42,10 @@ export const load: PageServerLoad = async ({ params }) => {
 					onHand: v.shopifyOnHand,
 					avgCost: v.avgCost,
 					costSource: v.costSource,
-					imageUrl: v.imageUrl
+					productId: v.productId,
+					position: v.position,
+					imageUrl: v.imageUrl,
+					weightG: v.weightG
 				})
 				.from(v)
 				.where(
@@ -44,19 +68,18 @@ export const load: PageServerLoad = async ({ params }) => {
 			isBundle: v.isBundle
 		})
 		.from(v)
-		.orderBy(asc(v.productTitle), asc(v.variantTitle));
+		.orderBy(
+			asc(v.productTitle),
+			asc(v.productId),
+			asc(sql`coalesce(${v.position}, 999999)`),
+			asc(v.variantTitle)
+		);
 	return {
 		batch: b.batch,
 		costs: b.costs,
 		totals: b.totals,
 		shipment: b.shipment,
-		lines: b.lines
-			.map((l) => ({ ...l, variant: byId.get(l.variantId) ?? null }))
-			.sort((a, c) =>
-				`${a.variant?.productTitle}${a.variant?.variantTitle}`.localeCompare(
-					`${c.variant?.productTitle}${c.variant?.variantTitle}`
-				)
-			),
+		lines: newestFirst(b.lines.map((l) => ({ ...l, variant: byId.get(l.variantId) ?? null }))),
 		// Draft/archived products are leftovers, and bundles are bought as their components.
 		options: options
 			.filter((o) => o.status === 'ACTIVE' && !o.isBundle)
@@ -324,6 +347,10 @@ export const actions: Actions = {
 					`Landed: ${r.units} units across ${r.items} products added in Shopify, costs updated.` +
 					(r.costFailed
 						? ` ${r.costFailed} cost updates failed in Shopify — retry from Inventory.`
+						: '') +
+					(r.weightsDone ? ` ${r.weightsDone} product weights updated in Shopify.` : '') +
+					(r.weightsFailed
+						? ` ${r.weightsFailed} weight updates failed — set them on Opening costs.`
 						: '')
 			};
 		} catch (e) {
