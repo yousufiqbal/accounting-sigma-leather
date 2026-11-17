@@ -229,6 +229,30 @@
 	const productCount = $derived(
 		new Set(data.lines.map((l) => l.variant?.productId ?? l.variantId)).size
 	);
+	/** Expected arrival = ordered on + days (drafts: from today). */
+	const addDays = (d: string, n: number) => {
+		const t = new Date(`${d}T12:00:00Z`);
+		t.setUTCDate(t.getUTCDate() + n);
+		return t.toISOString().slice(0, 10);
+	};
+	const fmtShort = (d: string) =>
+		new Date(`${d}T12:00:00Z`).toLocaleDateString('en-GB', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			timeZone: 'UTC'
+		});
+	const expectedOn = $derived(
+		b.expectedDays !== null && b.expectedDays !== undefined
+			? addDays(b.paidOn ?? today, b.expectedDays)
+			: null
+	);
+	const overdue = $derived(b.status === 'paid' && !!expectedOn && expectedOn < today);
+	/** Mark purchased: days box, prefilled from the Restock lead time (air for China). */
+	let markDays = $derived(
+		String(b.expectedDays ?? (b.currency === 'RMB' ? data.lead.airDays : ''))
+	);
+	let markDate = $state(today);
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -253,8 +277,10 @@
 					.shipment.fixed
 					? `${formatRs(data.shipment.ddpTotal ?? 0)} bill`
 					: `${formatRs(b.ddpRatePerKg)}/kg`}
-				{#if b.paidOn}· purchased {b.paidOn}{/if}
-				{#if b.landedOn}· arrived {b.landedOn}{/if}
+				{#if b.paidOn}· ordered {fmtShort(b.paidOn)}{/if}
+				{#if expectedOn && b.status !== 'landed'}· expected {fmtShort(expectedOn)}{/if}
+				{#if overdue}<StatusBadge tone="warning" label="overdue" />{/if}
+				{#if b.landedOn}· arrived {fmtShort(b.landedOn)}{/if}
 			</p>
 		</div>
 		{#if retrying}
@@ -279,13 +305,31 @@
 						use:enhance={act('paid')}
 						class="flex items-end gap-2"
 					>
-						<Input
-							type="date"
-							name="date"
-							value={today}
-							class="h-9 w-40"
-							aria-label="Purchased on"
-						/>
+						<div class="grid gap-1">
+							<Label for="orderedOn" class="text-xs text-muted-foreground">Ordered on</Label>
+							<Input
+								id="orderedOn"
+								type="date"
+								name="date"
+								bind:value={markDate}
+								class="h-9 w-40"
+							/>
+						</div>
+						<div class="grid gap-1">
+							<Label for="markDays" class="text-xs text-muted-foreground"
+								>Expected in (days){#if markDays.trim() && Number.isFinite(Number(markDays)) && markDate}
+									<span class="font-normal">≈ {fmtShort(addDays(markDate, Number(markDays)))}</span
+									>{/if}</Label
+							>
+							<Input
+								id="markDays"
+								name="expectedDays"
+								inputmode="numeric"
+								bind:value={markDays}
+								class="h-9 w-28"
+								placeholder="e.g. {data.lead.airDays}"
+							/>
+						</div>
 						<Button type="submit" disabled={!!busy || !data.lines.length}
 							>{busy === 'paid' ? 'Saving…' : 'Mark purchased'}</Button
 						>
@@ -350,7 +394,7 @@
 		<Card.Content>
 			{#if !editingHeader}
 				<div class="flex flex-wrap items-start gap-x-8 gap-y-3 text-sm">
-					{#each [['Name', b.ref], ['Supplier', b.supplier], ...(isRmb ? [['Rs per 1 yuan', String(b.fxRateX10000 / 10_000)]] : []), ['Notes', b.notes]] as [label, value] (label)}
+					{#each [['Name', b.ref], ['Supplier', b.supplier], ...(isRmb ? [['Rs per 1 yuan', String(b.fxRateX10000 / 10_000)]] : []), ...(b.paidOn ? [['Ordered on', fmtShort(b.paidOn)]] : []), ['Expected', expectedOn ? `${fmtShort(expectedOn)} (${b.expectedDays} days)${overdue ? ' — overdue' : ''}` : null], ['Notes', b.notes]] as [label, value] (label)}
 						<div class={['grid gap-0.5', label === 'Notes' && 'min-w-0 flex-1']}>
 							<span class="text-xs text-muted-foreground">{label}</span>
 							<span class={['font-medium', !value && 'text-muted-foreground']}>{value || '—'}</span>
@@ -389,6 +433,26 @@
 									inputmode="decimal"
 									value={b.fxRateX10000 / 10_000}
 									class="w-28"
+								/>
+							</div>
+						{/if}
+						<div class="grid gap-1.5">
+							<Label for="expectedDays">Expected in (days)</Label><Input
+								id="expectedDays"
+								name="expectedDays"
+								inputmode="numeric"
+								value={b.expectedDays ?? ''}
+								class="w-28"
+							/>
+						</div>
+						{#if b.status === 'paid'}
+							<div class="grid gap-1.5">
+								<Label for="orderedOnEdit">Ordered on</Label><Input
+									id="orderedOnEdit"
+									name="orderedOn"
+									type="date"
+									value={b.paidOn ?? ''}
+									class="w-40"
 								/>
 							</div>
 						{/if}

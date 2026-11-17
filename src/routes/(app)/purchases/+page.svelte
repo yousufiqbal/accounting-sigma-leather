@@ -43,6 +43,12 @@
 	const tab = $derived(TABS.find((t) => t.id === page.url.searchParams.get('tab')) ?? TABS[0]);
 	const shown = $derived(data.batches.filter((b) => tab.has(b.status)));
 	const count = (t: (typeof TABS)[number]) => data.batches.filter((b) => t.has(b.status)).length;
+	const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
+	const addDays = (d: string, n: number) => {
+		const t = new Date(`${d}T12:00:00Z`);
+		t.setUTCDate(t.getUTCDate() + n);
+		return t.toISOString().slice(0, 10);
+	};
 </script>
 
 <div class="grid gap-6">
@@ -105,8 +111,15 @@
 									{b.status === 'landed'
 										? fmtDate(b.landedOn)
 										: b.status === 'paid'
-											? fmtDate(b.paidOn)
+											? b.paidOn && b.expectedDays !== null
+												? `expected ${fmtDate(addDays(b.paidOn, b.expectedDays))}`
+												: fmtDate(b.paidOn)
 											: ''}
+									{#if b.status === 'paid' && b.paidOn && b.expectedDays !== null && addDays(b.paidOn, b.expectedDays) < today}<span
+											class="text-warning"
+										>
+											· overdue</span
+										>{/if}
 								</div>
 							</Table.Cell>
 							<Table.Cell class="num text-right">{b.items}</Table.Cell>

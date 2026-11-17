@@ -3,6 +3,8 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
 import { landBatch, loadBatch } from '#lib/server/stock.js';
+import { purchaseVariantIds, syncExpectedArrival } from '#lib/server/expected-arrival.js';
+import { getLead } from '#lib/server/restock.js';
 import type { Actions, PageServerLoad } from './$types';
 
 const v = schema.variants;
@@ -75,6 +77,7 @@ export const load: PageServerLoad = async ({ params }) => {
 			asc(v.variantTitle)
 		);
 	return {
+		lead: await getLead(),
 		batch: b.batch,
 		costs: b.costs,
 		totals: b.totals,
@@ -147,15 +150,26 @@ export const actions: Actions = {
 		} catch {
 			return fail(400, { error: 'Rates must be numbers.' });
 		}
+		const daysRaw = String(f.get('expectedDays') ?? '').trim();
+		const expectedDays = daysRaw === '' ? null : Number(daysRaw);
+		if (
+			expectedDays !== null &&
+			!(Number.isInteger(expectedDays) && expectedDays >= 0 && expectedDays <= 365)
+		)
+			return fail(400, { error: 'Expected arrival must be whole days (0–365).' });
+		const orderedOn = String(f.get('orderedOn') ?? '');
 		await db
 			.update(schema.importBatches)
 			.set({
 				ref,
 				supplier: String(f.get('supplier') ?? '').trim() || null,
 				notes: String(f.get('notes') ?? '').trim() || null,
-				fxRateX10000: fx
+				fxRateX10000: fx,
+				expectedDays,
+				...(batch.status === 'paid' && isDate(orderedOn) ? { paidOn: orderedOn } : {})
 			})
 			.where(eq(schema.importBatches.id, params.id));
+		if (batch.status === 'paid') await syncExpectedArrival(await purchaseVariantIds(params.id));
 		return { saved: 'Saved.' };
 	},
 
@@ -268,6 +282,7 @@ export const actions: Actions = {
 				unitWeightG: r.weightG
 			}))
 		);
+		if (batch.status === 'paid') await syncExpectedArrival(rows.map((r) => r.id));
 		return {
 			saved: `Added ${rows.length} ${rows.length === 1 ? 'item' : 'items'} — enter the quantities.`
 		};
@@ -305,21 +320,39 @@ export const actions: Actions = {
 	},
 
 	remove: async ({ params, request }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
+		const batch = await editable(params.id);
+		if (!batch) return fail(400, LANDED);
 		const id = String((await request.formData()).get('itemId'));
+		const line = await db.query.batchItems.findFirst({
+			where: and(eq(bi.id, id), eq(bi.batchId, params.id))
+		});
 		await db.delete(bi).where(and(eq(bi.id, id), eq(bi.batchId, params.id)));
+		if (line && batch.status === 'paid') await syncExpectedArrival([line.variantId]);
 		return { saved: 'Item removed.' };
 	},
 
 	paid: async ({ params, request }) => {
 		if (!(await editable(params.id))) return fail(400, LANDED);
-		const date = String((await request.formData()).get('date') ?? '');
-		if (!isDate(date)) return fail(400, { error: 'Pick a date.' });
+		const f = await request.formData();
+		const date = String(f.get('date') ?? '');
+		if (!isDate(date)) return fail(400, { error: 'Pick the date you ordered.' });
+		const daysRaw = String(f.get('expectedDays') ?? '').trim();
+		const expectedDays = daysRaw === '' ? null : Number(daysRaw);
+		if (
+			expectedDays !== null &&
+			!(Number.isInteger(expectedDays) && expectedDays >= 0 && expectedDays <= 365)
+		)
+			return fail(400, { error: 'Expected arrival must be whole days (0–365).' });
 		await db
 			.update(schema.importBatches)
-			.set({ status: 'paid', paidOn: date })
+			.set({ status: 'paid', paidOn: date, expectedDays })
 			.where(eq(schema.importBatches.id, params.id));
-		return { saved: 'Marked purchased — counted as incoming stock.' };
+		const sync = await syncExpectedArrival(await purchaseVariantIds(params.id));
+		return {
+			saved:
+				'Marked purchased — counted as incoming stock.' +
+				(sync.failed ? ` ${sync.failed} expected dates could not be sent to Shopify.` : '')
+		};
 	},
 
 	/** Purchased by mistake: back to draft (no stock effect). */
@@ -329,6 +362,7 @@ export const actions: Actions = {
 			.update(schema.importBatches)
 			.set({ status: 'draft', paidOn: null })
 			.where(eq(schema.importBatches.id, params.id));
+		await syncExpectedArrival(await purchaseVariantIds(params.id));
 		return { saved: 'Back to draft — no longer counted as incoming.' };
 	},
 
@@ -342,6 +376,7 @@ export const actions: Actions = {
 		if (cur?.status === 'draft') return fail(400, { error: 'Mark it purchased first.' });
 		try {
 			const r = await landBatch(params.id, date);
+			await syncExpectedArrival(await purchaseVariantIds(params.id));
 			return {
 				saved:
 					`Landed: ${r.units} units across ${r.items} products added in Shopify, costs updated.` +
@@ -359,12 +394,15 @@ export const actions: Actions = {
 	},
 
 	delete: async ({ params }) => {
-		if (!(await editable(params.id))) return fail(400, LANDED);
+		const gone = await editable(params.id);
+		if (!gone) return fail(400, LANDED);
+		const ids = await purchaseVariantIds(params.id);
 		await db.batch([
 			db.delete(bi).where(eq(bi.batchId, params.id)),
 			db.delete(schema.batchCosts).where(eq(schema.batchCosts.batchId, params.id)),
 			db.delete(schema.importBatches).where(eq(schema.importBatches.id, params.id))
 		]);
+		if (gone.status === 'paid') await syncExpectedArrival(ids);
 		redirect(303, '/purchases');
 	}
 };

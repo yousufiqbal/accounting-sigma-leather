@@ -42,6 +42,8 @@ export const variants = sqliteTable(
 		/** Shopify bundle (requiresComponents): stock/cost come from its component products. */
 		/** Variant order inside its product, as in Shopify (1, 2, 3…). */
 		position: integer('position'),
+		/** Last "expected back" date pushed to Shopify (custom.expected_arrival), YYYY-MM-DD. */
+		expectedArrival: text('expected_arrival'),
 		isBundle: integer('is_bundle', { mode: 'boolean' }), // variant image, else product's main image (Shopify CDN)
 		price: money('price_paisa'),
 		avgCost: money('avg_cost_paisa'),
@@ -110,6 +112,8 @@ export const importBatches = sqliteTable('import_batches', {
 	transportSplit: text('transport_split', { enum: ['weight', 'value'] }),
 	/** Yuan purchases: supplier → forwarder shipping inside China (fen); null = none. */
 	chinaShipMinor: integer('china_ship_minor'),
+	/** Days from "ordered on" (paid_on) to expected arrival; drives the shop's "expected back" date. */
+	expectedDays: integer('expected_days'),
 	status: text('status', { enum: ['draft', 'paid', 'landing', 'landed'] })
 		.notNull()
 		.default('draft'),
