@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { formAction } from '#lib/form-action.js';
 	import ChevronDown from '@lucide/svelte/icons/chevron-down';
+	import { Popover } from 'bits-ui';
 	import Thumb from '#lib/components/app/thumb.svelte';
 	import { enhance } from '$app/forms';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -52,13 +53,42 @@
 		t.setUTCDate(t.getUTCDate() + n);
 		return t.toISOString().slice(0, 10);
 	};
-	/** Purchases whose item list is expanded. */
-	let expanded = $state(new Set<string>());
-	function toggle(id: string) {
-		const next = new Set(expanded);
-		if (next.has(id)) next.delete(id);
-		else next.add(id);
-		expanded = next;
+	/** Days past the expected arrival for a purchased (not arrived) purchase; 0 = not late. */
+	const daysLate = (b: (typeof data.batches)[number]) => {
+		if (b.status !== 'paid' || !b.paidOn || b.expectedDays === null) return 0;
+		const due = addDays(b.paidOn, b.expectedDays);
+		if (due >= today) return 0;
+		return Math.round(
+			(Date.parse(`${today}T12:00:00Z`) - Date.parse(`${due}T12:00:00Z`)) / 86_400_000
+		);
+	};
+	const late = $derived(
+		data.batches
+			.map((b) => ({ b, days: daysLate(b) }))
+			.filter((x) => x.days > 0)
+			.sort((x, y) => y.days - x.days)
+	);
+	/**
+	 * One thumbnail per variant (its own picture). Variants that
+	 * share the very same picture show it once.
+	 */
+	function thumbs(lines: (typeof data.batches)[number]['lines']) {
+		const seen = new Set<string>();
+		const uniq = lines.filter((l) => {
+			const key = l.image ?? `none:${l.id}`;
+			if (seen.has(key)) return false;
+			seen.add(key);
+			return true;
+		});
+		return uniq;
+	}
+	/** Days until the expected arrival (negative = late); null when arrived or no date set. */
+	function daysToArrival(b: (typeof data.batches)[number]) {
+		if (b.status === 'landed' || !b.paidOn || b.expectedDays === null) return null;
+		const due = addDays(b.paidOn, b.expectedDays);
+		return Math.round(
+			(Date.parse(`${due}T12:00:00Z`) - Date.parse(`${today}T12:00:00Z`)) / 86_400_000
+		);
 	}
 </script>
 
@@ -73,6 +103,29 @@
 		</div>
 		<Button onclick={() => (open = true)}><Plus /> New purchase</Button>
 	</div>
+
+	{#if late.length}
+		<div class="rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
+			<p class="font-medium">
+				{late.length}
+				{late.length === 1 ? 'purchase is' : 'purchases are'} past the expected arrival — contact the
+				forwarder / supplier:
+			</p>
+			<ul class="mt-1.5 grid gap-1">
+				{#each late as { b, days } (b.id)}
+					<li>
+						<a href="/purchases/{b.id}" class="font-medium underline">{b.ref}</a>
+						<span class="text-muted-foreground">
+							{b.supplier ? `· ${b.supplier} ` : ''}· expected {fmtDate(
+								addDays(b.paidOn!, b.expectedDays!)
+							)} ·
+						</span>
+						<span class="font-medium text-warning">{days} {days === 1 ? 'day' : 'days'} late</span>
+					</li>
+				{/each}
+			</ul>
+		</div>
+	{/if}
 
 	<Card.Root>
 		<Card.Header class="pb-0" data-sveltekit-noscroll>
@@ -96,9 +149,8 @@
 						<Table.Head class="text-right">Items</Table.Head>
 						<Table.Head class="text-right">Units</Table.Head>
 						<Table.Head class="text-right">Weight</Table.Head>
-						<Table.Head class="text-right">Goods</Table.Head>
-						<Table.Head class="text-right">Transport</Table.Head>
-						<Table.Head class="pr-6 text-right">Landed total</Table.Head>
+						<Table.Head class="pl-8">Expected</Table.Head>
+						<Table.Head class="pr-6 pl-8">Products</Table.Head>
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
@@ -114,6 +166,10 @@
 							</Table.Cell>
 							<Table.Cell>
 								<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
+								{#if daysLate(b) > 0}<StatusBadge
+										tone="warning"
+										label="{daysLate(b)} {daysLate(b) === 1 ? 'day' : 'days'} late"
+									/>{/if}
 								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge
 										tone="warning"
 										label="Transport pending"
@@ -126,75 +182,91 @@
 												? `expected ${fmtDate(addDays(b.paidOn, b.expectedDays))}`
 												: fmtDate(b.paidOn)
 											: ''}
-									{#if b.status === 'paid' && b.paidOn && b.expectedDays !== null && addDays(b.paidOn, b.expectedDays) < today}<span
-											class="text-warning"
-										>
-											· overdue</span
-										>{/if}
 								</div>
 							</Table.Cell>
 							<Table.Cell class="text-right">
-								<button
-									type="button"
-									class="num inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent"
-									aria-expanded={expanded.has(b.id)}
-									title={expanded.has(b.id) ? 'Hide items' : 'Show items'}
-									onclick={() => toggle(b.id)}
-									>{b.items}<ChevronDown
-										class={['size-3.5 transition-transform', expanded.has(b.id) && 'rotate-180']}
-									/></button
-								>
+								<Popover.Root>
+									<Popover.Trigger
+										class="num inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent data-[state=open]:bg-accent"
+										title="Show items"
+									>
+										{b.items}<ChevronDown class="size-3.5" />
+									</Popover.Trigger>
+									<Popover.Portal>
+										<Popover.Content
+											align="end"
+											sideOffset={6}
+											class="z-50 w-[26rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-popover p-1 text-popover-foreground shadow-lg outline-none"
+										>
+											{#if b.lines.length}
+												<!-- About 6 rows tall, then scrolls. -->
+												<div class="max-h-[22rem] overflow-y-auto">
+													{#each b.lines as l (l.id)}
+														<div
+															class="flex items-center gap-2.5 rounded px-2 py-1.5 text-left text-sm hover:bg-accent/60"
+														>
+															<Thumb
+																src={l.image}
+																alt={`${l.title}${l.variant ? ` · ${l.variant}` : ''}`}
+																caption="Qty {l.qty}"
+																size={36}
+															/>
+															<div class="min-w-0 flex-1">
+																<div class="truncate" title={l.title}>{l.title}</div>
+																{#if l.variant}<div class="truncate text-xs text-muted-foreground">
+																		{l.variant}
+																	</div>{/if}
+																<div class="num text-xs text-muted-foreground">
+																	{l.qty} × {b.currency === 'PKR' ? 'Rs ' : '¥'}{(
+																		l.price / 100
+																	).toLocaleString('en-PK', { maximumFractionDigits: 2 })}
+																	· landed {formatRs(l.landed)}
+																</div>
+															</div>
+														</div>
+													{/each}
+												</div>
+											{:else}
+												<p class="px-2 py-3 text-sm text-muted-foreground">No items yet.</p>
+											{/if}
+										</Popover.Content>
+									</Popover.Portal>
+								</Popover.Root>
 							</Table.Cell>
 							<Table.Cell class="num text-right">{b.totals.units}</Table.Cell>
 							<Table.Cell class="num text-right"
 								>{(b.totals.weightG / 1000).toFixed(1)} kg</Table.Cell
 							>
-							<Table.Cell class="text-right"><Money paisa={b.totals.goods} /></Table.Cell>
-							<Table.Cell class="text-right"
-								><Money paisa={b.totals.ddp + b.totals.extra} /></Table.Cell
-							>
-							<Table.Cell class="pr-6 text-right font-medium"
-								><Money paisa={b.totals.landed} /></Table.Cell
-							>
+							<Table.Cell class="pl-8 whitespace-nowrap">
+								{@const due = daysToArrival(b)}
+								{#if due === null}<span class="text-muted-foreground">—</span>
+								{:else if due > 0}in {due} {due === 1 ? 'day' : 'days'}
+								{:else if due === 0}<span class="font-medium">today</span>
+								{:else}<span class="font-medium text-warning"
+										>{-due} {due === -1 ? 'day' : 'days'} late</span
+									>{/if}
+							</Table.Cell>
+							<Table.Cell class="pr-6 pl-8">
+								{@const pics = thumbs(b.lines)}
+								<!-- One picture per variant, left to right; the viewer pages through this purchase only. -->
+								<div
+									class="flex max-w-[24rem] [scrollbar-width:none] items-center gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden"
+									data-gallery
+								>
+									{#each pics as l (l.id)}
+										<Thumb
+											src={l.image}
+											alt={`${l.title}${l.variant ? ` · ${l.variant}` : ''}`}
+											caption="Qty {l.qty}"
+											size={32}
+										/>
+									{/each}
+								</div>
+							</Table.Cell>
 						</Table.Row>
-						{#if expanded.has(b.id)}
-							<Table.Row class="bg-muted/30 hover:bg-muted/30">
-								<Table.Cell colspan={8} class="px-6 py-3">
-									{#if b.lines.length}
-										<div class="grid gap-x-6 gap-y-2 sm:grid-cols-2 xl:grid-cols-3">
-											{#each b.lines as l (l.id)}
-												<div class="flex min-w-0 items-center gap-2.5 text-sm">
-													<Thumb
-														src={l.image}
-														alt={`${l.title}${l.variant ? ` · ${l.variant}` : ''}`}
-														caption="Qty {l.qty}"
-														size={36}
-													/>
-													<div class="min-w-0 flex-1">
-														<div class="truncate" title={l.title}>{l.title}</div>
-														<div class="truncate text-xs text-muted-foreground">
-															{l.variant ? `${l.variant} · ` : ''}{l.qty} ×
-															{b.currency === 'PKR' ? 'Rs ' : '¥'}{(l.price / 100).toLocaleString(
-																'en-PK',
-																{
-																	maximumFractionDigits: 2
-																}
-															)}
-															· landed {formatRs(l.landed)}
-														</div>
-													</div>
-												</div>
-											{/each}
-										</div>
-									{:else}
-										<p class="text-sm text-muted-foreground">No items yet.</p>
-									{/if}
-								</Table.Cell>
-							</Table.Row>
-						{/if}
 					{:else}
 						<Table.Row>
-							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
+							<Table.Cell colspan={7} class="py-10 text-center text-muted-foreground">
 								{data.batches.length
 									? `No ${tab.label.toLowerCase()} purchases.`
 									: 'No purchases yet. Stock you already have is costed on the Inventory page.'}

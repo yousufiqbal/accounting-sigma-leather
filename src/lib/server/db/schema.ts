@@ -130,7 +130,18 @@ export const batchItems = sqliteTable('batch_items', {
 	qty: integer('qty').notNull(),
 	unitPriceForeignMinor: integer('unit_price_foreign_minor').notNull().default(0),
 	unitWeightG: integer('unit_weight_g').notNull().default(0),
-	landedUnitCost: money('landed_unit_cost_paisa')
+	landedUnitCost: money('landed_unit_cost_paisa'),
+	// Saved at arrival so the purchase can be corrected later (average cost needs them).
+	haveAtLand: integer('have_at_land'), // on hand just before this purchase arrived
+	oldCostAtLand: integer('old_cost_at_land_paisa') // average cost just before it arrived
+});
+
+/** Changes made to a purchase after it arrived (what changed, as readable lines). */
+export const batchCorrections = sqliteTable('batch_corrections', {
+	id: id(),
+	batchId: text('batch_id').notNull(),
+	createdAt: createdAt(),
+	summary: text('summary').notNull() // json: { lines: string[], shopifyFixed: boolean }
 });
 
 export const batchCosts = sqliteTable('batch_costs', {
@@ -242,6 +253,26 @@ export const orderLines = sqliteTable(
 		costEstimated: integer('cost_estimated', { mode: 'boolean' }).notNull().default(false)
 	},
 	(t) => [index('order_lines_order_idx').on(t.orderId)]
+);
+
+/**
+ * Each Shopify fulfillment's lines: stock left the shelf at `createdAt`, and came back at
+ * `cancelledAt` if the fulfillment was cancelled. Used to explain on-hand changes
+ * (order_lines.qty can't: an item removed after a cancelled fulfillment shows qty 0).
+ */
+export const fulfillmentLines = sqliteTable(
+	'fulfillment_lines',
+	{
+		id: text('id').primaryKey(), // shopify fulfillment line item id
+		fulfillmentId: text('fulfillment_id').notNull(),
+		orderId: text('order_id').notNull(),
+		variantId: text('variant_id'),
+		qty: integer('qty').notNull(),
+		status: text('status').notNull(), // SUCCESS | CANCELLED | ERROR | FAILURE | …
+		createdAt: text('created_at').notNull(),
+		cancelledAt: text('cancelled_at') // first seen cancelled (Shopify's updatedAt then)
+	},
+	(t) => [index('fulfillment_lines_order_idx').on(t.orderId)]
 );
 
 // ─── Courier ───────────────────────────────────────────────────────────────────

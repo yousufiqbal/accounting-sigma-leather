@@ -235,7 +235,16 @@ type OrderNode = {
 	totalOutstandingSet: Money;
 	shippingLines: { nodes: { discountedPriceSet: Money }[] };
 	discountApplications: { nodes: DiscountApp[] };
-	fulfillments: { createdAt: string; trackingInfo: { number: string | null }[] }[];
+	fulfillments: {
+		id: string;
+		createdAt: string;
+		updatedAt: string;
+		status: string;
+		trackingInfo: { number: string | null }[];
+		fulfillmentLineItems: {
+			nodes: { id: string; quantity: number; lineItem: { variant: { id: string } | null } }[];
+		};
+	}[];
 	customer: {
 		id: string;
 		displayName: string | null;
@@ -271,7 +280,10 @@ const ORDER_FIELDS = `
 		... on ManualDiscountApplication { title }
 		... on AutomaticDiscountApplication { title }
 	} }
-	fulfillments(first: 5) { createdAt trackingInfo(first: 3) { number } }
+	fulfillments(first: 10) {
+		id createdAt updatedAt status trackingInfo(first: 3) { number }
+		fulfillmentLineItems(first: 60) { nodes { id quantity lineItem { variant { id } } } }
+	}
 	customer { id displayName defaultPhoneNumber { phoneNumber } }
 	shippingAddress { city phone }
 	lineItems(first: 60) { nodes {
@@ -329,10 +341,11 @@ function toRows(o: OrderNode) {
 		gateways.some((g) => /advance payment/i.test(g)) ||
 		(!hasCod && gateways.includes('manual')) ||
 		prepaidDiscount > 0;
-	const fulfilledAt = o.fulfillments.map((f) => f.createdAt).sort()[0] ?? null;
+	// Cancelled / failed fulfillments put the stock back — they don't count as shipped.
+	const live = o.fulfillments.filter((f) => !['CANCELLED', 'ERROR', 'FAILURE'].includes(f.status));
+	const fulfilledAt = live.map((f) => f.createdAt).sort()[0] ?? null;
 	const fulfillmentTracking =
-		o.fulfillments.flatMap((f) => f.trackingInfo.map((t) => t.number?.trim())).find(Boolean) ??
-		null;
+		live.flatMap((f) => f.trackingInfo.map((t) => t.number?.trim())).find(Boolean) ?? null;
 	const order = {
 		id: orderId,
 		name: o.name.replace(/^#/, ''),
@@ -375,7 +388,19 @@ function toRows(o: OrderNode) {
 				updatedAt: o.updatedAt
 			}
 		: null;
-	return { order, lines, customer };
+	const fulfillmentLines = o.fulfillments.flatMap((f) =>
+		f.fulfillmentLineItems.nodes.map((n) => ({
+			id: gidId(n.id),
+			fulfillmentId: gidId(f.id),
+			orderId,
+			variantId: n.lineItem.variant ? gidId(n.lineItem.variant.id) : null,
+			qty: n.quantity,
+			status: f.status,
+			createdAt: f.createdAt,
+			cancelledAt: f.status === 'CANCELLED' ? f.updatedAt : null
+		}))
+	);
+	return { order, lines, customer, fulfillmentLines };
 }
 
 /** `recent` = orders updated since the last sync (minus a safety day); `full` = everything. */
@@ -402,7 +427,7 @@ export function syncOrders(mode: 'recent' | 'full' = 'recent') {
 			);
 			const stmts = [];
 			for (const node of d.orders.nodes) {
-				const { order, lines, customer } = toRows(node);
+				const { order, lines, customer, fulfillmentLines } = toRows(node);
 				const { id: _id, ...orderUpdate } = order;
 				if (customer) {
 					const { id: _cid, ...customerUpdate } = customer;
@@ -431,6 +456,23 @@ export function syncOrders(mode: 'recent' | 'full' = 'recent') {
 							.insert(schema.orderLines)
 							.values(l)
 							.onConflictDoUpdate({ target: schema.orderLines.id, set: lineUpdate })
+					);
+				}
+				for (const f of fulfillmentLines) {
+					stmts.push(
+						db
+							.insert(schema.fulfillmentLines)
+							.values(f)
+							.onConflictDoUpdate({
+								target: schema.fulfillmentLines.id,
+								set: {
+									qty: f.qty,
+									status: f.status,
+									variantId: f.variantId,
+									// Keep the first cancel time seen; Shopify's updatedAt can move later.
+									cancelledAt: sql`coalesce(${schema.fulfillmentLines.cancelledAt}, ${f.cancelledAt})`
+								}
+							})
 					);
 				}
 				if (node.updatedAt > maxUpdated) maxUpdated = node.updatedAt;

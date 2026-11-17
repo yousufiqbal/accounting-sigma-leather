@@ -2,7 +2,13 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { db, schema } from '#lib/server/db/index.js';
 import { toPaisa } from '#lib/money.js';
-import { landBatch, loadBatch } from '#lib/server/stock.js';
+import {
+	applyCorrection,
+	landBatch,
+	loadBatch,
+	planCorrection,
+	type CorrectionInput
+} from '#lib/server/stock.js';
 import { purchaseVariantIds, syncExpectedArrival } from '#lib/server/expected-arrival.js';
 import { getLead } from '#lib/server/restock.js';
 import type { Actions, PageServerLoad } from './$types';
@@ -76,7 +82,18 @@ export const load: PageServerLoad = async ({ params }) => {
 			asc(sql`coalesce(${v.position}, 999999)`),
 			asc(v.variantTitle)
 		);
+	const corrections = (
+		await db
+			.select()
+			.from(schema.batchCorrections)
+			.where(eq(schema.batchCorrections.batchId, params.id))
+			.orderBy(asc(schema.batchCorrections.createdAt))
+	).map((c) => ({
+		at: c.createdAt,
+		...(JSON.parse(c.summary) as { lines: string[]; shopifyFixed: boolean })
+	}));
 	return {
+		corrections,
 		lead: await getLead(),
 		batch: b.batch,
 		costs: b.costs,
@@ -106,6 +123,45 @@ async function editable(id: string) {
 const LANDED = {
 	error: 'This purchase has arrived (or is being added to stock) and can no longer be changed.'
 };
+/** Correction form: changed rows (as typed) + transport (null = unchanged). */
+function parseCorrection(f: FormData): CorrectionInput {
+	const rows = (
+		JSON.parse(String(f.get('rows') ?? '[]')) as {
+			id: string;
+			qty: string;
+			price: string;
+			weight: string;
+		}[]
+	).map((r) => {
+		const qty = Number(r.qty);
+		const weight = Math.round(Number(r.weight) * 100) / 100;
+		if (!Number.isInteger(qty) || qty < 0 || !(weight >= 0))
+			throw new Error('Quantity must be a whole number; price and weight must be numbers.');
+		return { id: r.id, qty, price: Math.abs(toPaisa(r.price)), weight };
+	});
+	const raw = JSON.parse(String(f.get('ship') ?? 'null')) as Record<string, string> | null;
+	if (!raw) return { rows, ship: null };
+	const n = (x: string | undefined) => {
+		const t = String(x ?? '')
+			.trim()
+			.replace(/,/g, '');
+		if (t === '') return null;
+		const v = Number(t);
+		if (!Number.isFinite(v) || v < 0) throw new Error('Transport amounts must be numbers.');
+		return v;
+	};
+	return {
+		rows,
+		ship: {
+			mode: raw.mode === 'fixed' ? 'fixed' : 'perkg',
+			billedKg: n(raw.kg),
+			rate: n(raw.rate) ?? 0,
+			bill: n(raw.bill),
+			split: raw.split === 'value' ? 'value' : 'weight',
+			china: n(raw.china)
+		}
+	};
+}
 const isDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 /** Add qty to an existing line for the variant, or create one (weight from Shopify). */
@@ -380,6 +436,52 @@ export const actions: Actions = {
 					(r.weightsFailed
 						? ` ${r.weightsFailed} weight updates failed — set them on Opening costs.`
 						: '')
+			};
+		} catch (e) {
+			return fail(400, { error: e instanceof Error ? e.message : String(e) });
+		}
+	},
+
+	/** Arrived purchase: what a correction would change (nothing saved). */
+	correctPreview: async ({ params, request }) => {
+		try {
+			const p = await planCorrection(params.id, parseCorrection(await request.formData()));
+			return {
+				preview: {
+					blocked: p.blocked,
+					lines: p.changed.map((l) => ({
+						id: l.id,
+						title: l.title,
+						imageUrl: l.imageUrl,
+						qty: l.qty,
+						price: l.price,
+						weight: l.weight,
+						avg: l.avg,
+						qtyDelta: l.qtyDelta,
+						match: l.match ? { reason: l.match.reason } : null
+					})),
+					units: [p.totals.before.units, p.totals.after.units],
+					landed: [p.totals.before.landed, p.totals.after.landed],
+					ddp: [p.totals.before.ddp, p.totals.after.ddp]
+				}
+			};
+		} catch (e) {
+			return fail(400, { error: e instanceof Error ? e.message : String(e) });
+		}
+	},
+
+	/** Arrived purchase: apply the correction (Shopify gets only the differences). */
+	correct: async ({ params, request }) => {
+		try {
+			const f = await request.formData();
+			const r = await applyCorrection(params.id, parseCorrection(f), f.get('shopifyFixed') === '1');
+			return {
+				saved:
+					`Corrected ${r.lines} ${r.lines === 1 ? 'line' : 'lines'}.` +
+					(r.stockSent ? ` Stock changed in Shopify for ${r.stockSent}.` : '') +
+					(r.cleared ? ` ${r.cleared} stock changes cleared from the inbox.` : '') +
+					(r.costFailed ? ` ${r.costFailed} cost updates failed in Shopify.` : '') +
+					(r.weightsFailed ? ` ${r.weightsFailed} weight updates failed in Shopify.` : '')
 			};
 		} catch (e) {
 			return fail(400, { error: e instanceof Error ? e.message : String(e) });

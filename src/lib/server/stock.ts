@@ -390,13 +390,15 @@ export async function landBatch(id: string, landedOn: string) {
 					avgCost: p.newAvg,
 					costSource: 'batch',
 					shopifyCost: costFailed.includes(x.inventoryItemId!) ? x.shopifyCost : p.newAvg,
-					shopifyOnHand: p.have + p.line.qty,
+					// Add to the stored count, not the live one: the live count already includes
+					// shipments the next stock check still has to explain (else they show as +N).
+					shopifyOnHand: sql`coalesce(${v.shopifyOnHand}, 0) + ${p.line.qty}`,
 					updatedAt: now
 				})
 				.where(eq(v.id, x.id)),
 			db
 				.update(schema.batchItems)
-				.set({ landedUnitCost: p.line.landed })
+				.set({ landedUnitCost: p.line.landed, haveAtLand: p.have, oldCostAtLand: x.avgCost })
 				.where(eq(schema.batchItems.id, p.line.id))
 		);
 	}
@@ -428,6 +430,327 @@ export async function landBatch(id: string, landedOn: string) {
 	};
 }
 
+// ─── Correct an arrived purchase ──────────────────────────────────────────────
+
+export type CorrectionInput = {
+	/** Changed lines only. Price in minor units of the purchase currency, weight in grams. */
+	rows: { id: string; qty: number; price: number; weight: number }[];
+	/** New transport, or null to keep it. */
+	ship: {
+		mode: 'perkg' | 'fixed';
+		billedKg: number | null;
+		rate: number;
+		bill: number | null;
+		split: 'weight' | 'value';
+		china: number | null;
+	} | null;
+};
+
+const avgOf = (have: number, old: number, qty: number, landed: number) =>
+	have + qty > 0 ? Math.round((have * old + qty * landed) / (have + qty)) : old;
+
+/**
+ * Purchases that arrived before `have_at_land` was saved: the stock on hand at arrival is the
+ * whole number that reproduces the average cost recorded then. null = can't tell.
+ */
+function deriveHave(qty: number, landed: number, oldEff: number, newAvg: number) {
+	const guess = newAvg !== oldEff ? (qty * (landed - newAvg)) / (newAvg - oldEff) : 0;
+	let have: number | null = null;
+	let best = Infinity;
+	for (let n = 0; n <= 5000; n++)
+		if (avgOf(n, oldEff, qty, landed) === newAvg && Math.abs(n - guess) < best) {
+			best = Math.abs(n - guess);
+			have = n;
+		}
+	return have;
+}
+
+/**
+ * What correcting an arrived purchase would change: per line the stock difference and the
+ * average cost before → after. Lines bought again in a later arrived purchase can't change
+ * (their later averages would all need redoing).
+ */
+export async function planCorrection(id: string, input: CorrectionInput) {
+	const b = await loadBatch(id);
+	if (!b) throw new Error('Purchase not found.');
+	if (b.batch.status !== 'landed') throw new Error('Only arrived purchases can be corrected.');
+	const rowsBy = new Map(input.rows.map((r) => [r.id, r]));
+	const items2 = b.items.map((i) => {
+		const r = rowsBy.get(i.id);
+		return r ? { ...i, qty: r.qty, unitPriceForeignMinor: r.price, unitWeightG: r.weight } : i;
+	});
+	const s = input.ship;
+	const batch2 = !s
+		? b.batch
+		: {
+				...b.batch,
+				chinaShipMinor: s.china ? Math.round(s.china * 100) : null,
+				...(s.mode === 'fixed'
+					? { ddpTotal: Math.round((s.bill ?? 0) * 100), transportSplit: s.split }
+					: {
+							ddpTotal: null,
+							billedWeightG: s.billedKg === null ? null : Math.round(s.billedKg * 1000),
+							ddpRatePerKg: Math.round(s.rate * 100)
+						})
+			};
+	const after = priceBatch(batch2, items2, b.costs);
+	if (!after.shipment.transportSet)
+		throw new Error('Enter the transport — per kg (rate and box weight) or a fixed bill.');
+	if (!after.shipment.fixed && after.shipment.ddpTotal && after.shipment.itemsWithoutWeight)
+		throw new Error(
+			`${after.shipment.itemsWithoutWeight} items have no weight. Enter their weights.`
+		);
+
+	const variantIds = b.items.map((i) => i.variantId);
+	const [landed] = (await db.all(sql`
+		select min(created_at) as at from stock_movements
+		where type = 'receipt' and ref_id = ${id}`)) as { at: string | null }[];
+	const landedAt = landed?.at ?? '';
+	const list = JSON.stringify(variantIds);
+	const later = new Set(
+		(
+			(await db.all(sql`
+				select distinct variant_id as id from stock_movements
+				where type = 'receipt' and ref_id != ${id} and created_at > ${landedAt}
+					and variant_id in (select value from json_each(${list}))`)) as { id: string }[]
+		).map((r) => r.id)
+	);
+	const hist = new Map(
+		(await db.select().from(schema.costHistory).where(eq(schema.costHistory.refId, id))).map(
+			(h) => [h.variantId, h]
+		)
+	);
+	const vars = new Map(
+		(await db.select().from(v).where(inArray(v.id, variantIds))).map((x) => [x.id, x])
+	);
+	// Stock changes recorded since arrival (cleared when Shopify was already fixed by hand).
+	const changes = (await db.all(sql`
+		select id, variant_id as variantId, qty_delta as qty, reason from stock_movements
+		where type = 'variance' and created_at > ${landedAt}
+			and variant_id in (select value from json_each(${list}))
+		order by created_at desc`)) as {
+		id: string;
+		variantId: string;
+		qty: number;
+		reason: string | null;
+	}[];
+
+	const blocked: string[] = [];
+	const lines = after.lines.map((l2) => {
+		const l = b.lines.find((x) => x.id === l2.id)!;
+		const x = vars.get(l.variantId);
+		const h = hist.get(l.variantId);
+		const title = x
+			? `${x.productTitle}${x.variantTitle ? ` · ${x.variantTitle}` : ''}`
+			: 'Deleted product';
+		const old = l.oldCostAtLand ?? h?.oldCost ?? 0;
+		const oldEff = old > 0 ? old : l.landedUnitCost;
+		const have =
+			l.haveAtLand ?? (h ? deriveHave(l.qty, l.landedUnitCost, oldEff, h.newCost) : null);
+		const prevAvg = have === null ? null : avgOf(have, oldEff, l.qty, l.landedUnitCost);
+		const newAvg = have === null ? null : avgOf(have, old > 0 ? old : l2.landed, l2.qty, l2.landed);
+		const qtyDelta = l2.qty - l.qty;
+		const touched =
+			qtyDelta !== 0 ||
+			l2.unitPriceForeignMinor !== l.unitPriceForeignMinor ||
+			l2.unitWeightG !== l.unitWeightG ||
+			l2.landed !== l.landedUnitCost;
+		const avgNow = x?.avgCost ?? 0;
+		if (touched) {
+			if (!x?.inventoryItemId) blocked.push(`${title}: not linked to Shopify`);
+			else if (later.has(l.variantId))
+				blocked.push(`${title}: bought again in a later purchase that has arrived`);
+			else if (have === null || prevAvg === null)
+				blocked.push(`${title}: can't work out the stock it was added to`);
+			else if (avgNow !== prevAvg) blocked.push(`${title}: its cost changed after this purchase`);
+		}
+		const match =
+			qtyDelta !== 0
+				? (changes.find((c) => c.variantId === l.variantId && c.qty === qtyDelta) ?? null)
+				: null;
+		return {
+			id: l.id,
+			variantId: l.variantId,
+			inventoryItemId: x?.inventoryItemId ?? null,
+			title,
+			imageUrl: x?.imageUrl ?? null,
+			touched,
+			qty: [l.qty, l2.qty] as [number, number],
+			price: [l.unitPriceForeignMinor, l2.unitPriceForeignMinor] as [number, number],
+			weight: [l.unitWeightG, l2.unitWeightG] as [number, number],
+			landed: [l.landedUnitCost, l2.landed] as [number, number],
+			avg: [avgNow, newAvg ?? avgNow] as [number, number],
+			qtyDelta,
+			have,
+			old,
+			shopifyWeight: x?.weightG ?? null,
+			shopifyCostSynced: x ? x.shopifyCost === x.avgCost : false,
+			match
+		};
+	});
+	return {
+		batch: b.batch,
+		batch2,
+		lines,
+		changed: lines.filter((l) => l.touched),
+		blocked,
+		totals: { before: b.totals, after: after.totals }
+	};
+}
+
+/**
+ * Apply a correction. Shopify gets only the stock differences (unless it was already fixed by
+ * hand — then the matching stock changes in the inbox are cleared instead) and the new costs.
+ */
+export async function applyCorrection(id: string, input: CorrectionInput, shopifyFixed: boolean) {
+	const p = await planCorrection(id, input);
+	if (p.blocked.length) throw new Error(p.blocked.join('\n'));
+	if (!p.changed.length && !input.ship) throw new Error('Nothing changed.');
+	const moved = p.changed.filter((l) => l.qtyDelta !== 0);
+
+	// 1. Shopify stock: only the differences.
+	if (!shopifyFixed && moved.length) {
+		const locationId = await primaryLocation();
+		const d = await shopifyGql<{
+			inventoryAdjustQuantities: { userErrors: { message: string }[] };
+		}>(
+			`mutation($input: InventoryAdjustQuantitiesInput!, $key: String!) {
+				inventoryAdjustQuantities(input: $input) @idempotent(key: $key) { userErrors { message } }
+			}`,
+			{
+				key: `sl-correct-${id}-${crypto.randomUUID()}`,
+				input: {
+					name: 'available',
+					reason: 'correction',
+					referenceDocumentUri: `accounting-panel://import-batch/${encodeURIComponent(p.batch.ref)}`,
+					changes: moved.map((l) => ({
+						inventoryItemId: `gid://shopify/InventoryItem/${l.inventoryItemId}`,
+						locationId,
+						delta: l.qtyDelta,
+						changeFromQuantity: null
+					}))
+				}
+			}
+		);
+		const errs = d.inventoryAdjustQuantities.userErrors;
+		if (errs.length)
+			throw new Error(`Shopify stock update: ${errs.map((e) => e.message).join('; ')}`);
+	}
+	// 2. Costs in Shopify.
+	const costMoved = p.changed.filter((l) => l.avg[1] !== l.avg[0] && l.inventoryItemId);
+	const costFailed = new Set(
+		await pushCosts(costMoved.map((l) => ({ inventoryItemId: l.inventoryItemId!, cost: l.avg[1] })))
+	);
+
+	// 3. Local ledger, in one transaction.
+	const now = new Date().toISOString();
+	const fmt = (n: number) => (n / 100).toLocaleString('en-PK', { maximumFractionDigits: 2 });
+	const sym = p.batch.currency === 'PKR' ? 'Rs ' : '¥';
+	const summary: string[] = [];
+	const stmts = [];
+	for (const l of p.lines) {
+		stmts.push(
+			db
+				.update(schema.batchItems)
+				.set({
+					qty: l.qty[1],
+					unitPriceForeignMinor: l.price[1],
+					unitWeightG: l.weight[1],
+					landedUnitCost: l.landed[1],
+					...(l.have !== null ? { haveAtLand: l.have, oldCostAtLand: l.old } : {})
+				})
+				.where(eq(schema.batchItems.id, l.id))
+		);
+		if (!l.touched) continue;
+		const bits: string[] = [];
+		if (l.qtyDelta) bits.push(`qty ${l.qty[0]} → ${l.qty[1]}`);
+		if (l.price[0] !== l.price[1])
+			bits.push(`price ${sym}${fmt(l.price[0])} → ${sym}${fmt(l.price[1])}`);
+		if (l.weight[0] !== l.weight[1]) bits.push(`weight ${l.weight[0]} g → ${l.weight[1]} g`);
+		if (l.avg[0] !== l.avg[1]) bits.push(`cost Rs ${fmt(l.avg[0])} → Rs ${fmt(l.avg[1])}`);
+		if (bits.length) summary.push(`${l.title}: ${bits.join(', ')}`);
+		stmts.push(
+			db
+				.update(schema.stockMovements)
+				.set({ qtyDelta: l.qty[1], unitCost: l.landed[1] })
+				.where(
+					and(
+						eq(schema.stockMovements.refId, id),
+						eq(schema.stockMovements.type, 'receipt'),
+						eq(schema.stockMovements.variantId, l.variantId)
+					)
+				),
+			db
+				.update(schema.costHistory)
+				.set({ newCost: l.avg[1] })
+				.where(
+					and(eq(schema.costHistory.refId, id), eq(schema.costHistory.variantId, l.variantId))
+				),
+			db
+				.update(v)
+				.set({
+					avgCost: l.avg[1],
+					...(l.shopifyCostSynced && !costFailed.has(l.inventoryItemId!)
+						? { shopifyCost: l.avg[1] }
+						: {}),
+					// Keep the stored count in step with Shopify so the next stock check doesn't flag
+					// it. (Fixed by hand and already seen by a check: that inbox row is cleared instead.)
+					...(l.qtyDelta && !(shopifyFixed && l.match)
+						? { shopifyOnHand: sql`coalesce(${v.shopifyOnHand}, 0) + ${l.qtyDelta}` }
+						: {}),
+					updatedAt: now
+				})
+				.where(eq(v.id, l.variantId))
+		);
+		if (shopifyFixed && l.match)
+			stmts.push(db.delete(schema.stockMovements).where(eq(schema.stockMovements.id, l.match.id)));
+	}
+	if (input.ship) {
+		const b2 = p.batch2;
+		stmts.push(
+			db
+				.update(schema.importBatches)
+				.set({
+					ddpTotal: b2.ddpTotal,
+					billedWeightG: b2.billedWeightG,
+					ddpRatePerKg: b2.ddpRatePerKg,
+					transportSplit: b2.transportSplit,
+					chinaShipMinor: b2.chinaShipMinor
+				})
+				.where(eq(schema.importBatches.id, id))
+		);
+		if (p.totals.before.ddp !== p.totals.after.ddp)
+			summary.unshift(`Transport: Rs ${fmt(p.totals.before.ddp)} → Rs ${fmt(p.totals.after.ddp)}`);
+	}
+	stmts.push(
+		db.insert(schema.batchCorrections).values({
+			batchId: id,
+			summary: JSON.stringify({ lines: summary, shopifyFixed: shopifyFixed && moved.length > 0 })
+		})
+	);
+	await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
+	const { updateBundleCosts } = await import('./costing.js');
+	await updateBundleCosts();
+
+	// 4. Weights entered on the purchase become the products' weights (as on arrival).
+	const weightChanges = p.changed
+		.filter(
+			(l) => l.weight[1] > 0 && l.weight[0] !== l.weight[1] && l.shopifyWeight !== l.weight[1]
+		)
+		.map((l) => ({ id: l.variantId, weightG: l.weight[1] }));
+	const w = await pushWeights(weightChanges).catch(() => ({
+		done: 0,
+		failed: weightChanges.length
+	}));
+	return {
+		lines: p.changed.length,
+		stockSent: shopifyFixed ? 0 : moved.length,
+		cleared: shopifyFixed ? moved.filter((l) => l.match).length : 0,
+		costFailed: costFailed.size,
+		weightsFailed: w.failed
+	};
+}
+
 // ─── Shopify stock check (SPEC.md §5) ──────────────────────────────────────────
 
 export const VARIANCE_REASONS = ['returned', 'damaged', 'missing', 'count', 'ignore'] as const;
@@ -450,12 +773,26 @@ export async function recordStockChanges(
 	await setSetting('stock_checked_at', anchor);
 	if (!last) return { baseline: true, changes: 0 };
 
+	// Shipped = fulfillment lines created in the window, minus ones cancelled in it (stock back).
+	// Orders synced before fulfillment lines were stored fall back to their current line qty.
 	const shipped = (await db.all(sql`
-		select l.variant_id as id, sum(l.qty) as qty
-		from order_lines l join orders o on o.id = l.order_id
-		where o.fulfilled_at > ${last} and o.fulfilled_at <= ${anchor}
-			and o.cancelled_at is null and o.test = 0 and l.variant_id is not null
-		group by l.variant_id`)) as { id: string; qty: number }[];
+		select id, sum(qty) as qty from (
+			select f.variant_id as id, f.qty as qty
+			from fulfillment_lines f join orders o on o.id = f.order_id
+			where f.created_at > ${last} and f.created_at <= ${anchor}
+				and f.status not in ('ERROR', 'FAILURE') and o.test = 0 and f.variant_id is not null
+			union all
+			select f.variant_id, -f.qty
+			from fulfillment_lines f join orders o on o.id = f.order_id
+			where f.cancelled_at > ${last} and f.cancelled_at <= ${anchor}
+				and o.test = 0 and f.variant_id is not null
+			union all
+			select l.variant_id, l.qty
+			from order_lines l join orders o on o.id = l.order_id
+			where o.fulfilled_at > ${last} and o.fulfilled_at <= ${anchor}
+				and o.cancelled_at is null and o.test = 0 and l.variant_id is not null
+				and not exists (select 1 from fulfillment_lines f where f.order_id = o.id)
+		) group by id`)) as { id: string; qty: number }[];
 	const shippedBy = new Map(shipped.map((s) => [s.id, s.qty]));
 
 	const vrows = await db.select({ id: v.id, avgCost: v.avgCost, status: v.status }).from(v);

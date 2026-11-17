@@ -4,8 +4,8 @@
 	import Thumb from '#lib/components/app/thumb.svelte';
 	import ProductPickerDialog from '#lib/components/app/product-picker-dialog.svelte';
 	import Plus from '@lucide/svelte/icons/plus';
-	import { enhance } from '$app/forms';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { applyAction, deserialize, enhance } from '$app/forms';
+	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import { tick } from 'svelte';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import Trash from '@lucide/svelte/icons/trash-2';
@@ -32,6 +32,9 @@
 	const b = $derived(data.batch);
 	const locked = $derived(b.status === 'landed' || b.status === 'landing');
 	const retrying = $derived(b.status === 'landing');
+	/** Correcting an arrived purchase: the table and transport unlock, nothing saves until applied. */
+	let correcting = $state(false);
+	const canEdit = $derived(!locked || correcting);
 	const isRmb = $derived(b.currency !== 'PKR');
 	const sym = $derived(isRmb ? '¥' : 'Rs');
 	const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
@@ -196,6 +199,122 @@
 	 * and leaving to another page in the panel asks with our own dialog.
 	 */
 	const unsaved = $derived(!!dirty || shipDirty);
+
+	// ─── Correct an arrived purchase ───
+	type Preview = {
+		blocked: string[];
+		lines: {
+			id: string;
+			title: string;
+			imageUrl: string | null;
+			qty: [number, number];
+			price: [number, number];
+			weight: [number, number];
+			avg: [number, number];
+			qtyDelta: number;
+			match: { reason: string | null } | null;
+		}[];
+		units: [number, number];
+		landed: [number, number];
+		ddp: [number, number];
+	};
+	let preview = $state<Preview | null>(null);
+	let correctOpen = $state(false);
+	let shopifyFixed = $state(false);
+	let correctTyped = $state('');
+	const moved = $derived(preview?.lines.filter((l) => l.qtyDelta !== 0) ?? []);
+	const isEdited = (l: Preview['lines'][number]) =>
+		l.qtyDelta !== 0 || l.price[0] !== l.price[1] || l.weight[0] !== l.weight[1];
+	/** Lines you changed; the rest only shift a little (their share of transport). */
+	const edited = $derived(preview?.lines.filter(isEdited) ?? []);
+	const shifted = $derived(preview?.lines.filter((l) => !isEdited(l)) ?? []);
+	const maxShift = $derived(Math.max(0, ...shifted.map((l) => Math.abs(l.avg[1] - l.avg[0]))));
+	const split = (t: string) => {
+		const i = t.lastIndexOf(' · ');
+		return i < 0 ? [t, ''] : [t.slice(0, i), t.slice(i + 3)];
+	};
+	/**
+	 * Confirm by typing the unit change (e.g. -10, +3). No unit change (price / weight / transport
+	 * only): the number of lines that change.
+	 */
+	const unitDelta = $derived(preview ? preview.units[1] - preview.units[0] : 0);
+	const confirmCode = $derived(
+		!preview
+			? ''
+			: unitDelta !== 0
+				? `${unitDelta > 0 ? '+' : ''}${unitDelta}`
+				: String(preview.lines.length)
+	);
+	const correctOk = $derived(
+		!!preview &&
+			(correctTyped.trim() === confirmCode ||
+				(unitDelta > 0 && correctTyped.trim() === String(unitDelta)))
+	);
+	function correctionData() {
+		const fd = new FormData();
+		fd.set('rows', JSON.stringify(Object.entries(edits).map(([id, x]) => ({ id, ...x }))));
+		fd.set('ship', JSON.stringify(shipDirty ? shipEdit : null));
+		return fd;
+	}
+	async function post(name: string, fd: FormData) {
+		const res = await fetch(formAction(name), {
+			method: 'POST',
+			body: fd,
+			headers: { 'x-sveltekit-action': 'true' }
+		});
+		return deserialize(await res.text());
+	}
+	async function reviewCorrection() {
+		busy = 'preview';
+		try {
+			const r = await post('correctPreview', correctionData());
+			if (r.type !== 'success') return applyAction(r);
+			const p = (r.data as { preview: Preview }).preview;
+			if (p.blocked.length) {
+				await notice({
+					title: "These lines can't be corrected",
+					description: p.blocked.join('\n')
+				});
+				return;
+			}
+			if (!p.lines.length) {
+				await notice({
+					title: 'Nothing changed',
+					description: 'Change a line or the transport first.'
+				});
+				return;
+			}
+			preview = p;
+			shopifyFixed = false;
+			correctTyped = '';
+			correctOpen = true;
+		} finally {
+			busy = null;
+		}
+	}
+	async function applyCorrection() {
+		busy = 'correct';
+		try {
+			const fd = correctionData();
+			if (shopifyFixed) fd.set('shopifyFixed', '1');
+			const r = await post('correct', fd);
+			if (r.type === 'success') {
+				correctOpen = false;
+				edits = {};
+				shipEdit = null;
+				correcting = false;
+				await invalidateAll();
+			}
+			await applyAction(r);
+		} finally {
+			busy = null;
+		}
+	}
+	function stopCorrecting() {
+		edits = {};
+		shipEdit = null;
+		correcting = false;
+	}
 	let leaving = false;
 	beforeNavigate(({ cancel, to, type }) => {
 		if (!unsaved || leaving) return;
@@ -252,6 +371,13 @@
 			: null
 	);
 	const overdue = $derived(b.status === 'paid' && !!expectedOn && expectedOn < today);
+	const lateDays = $derived(
+		overdue && expectedOn
+			? Math.round(
+					(Date.parse(`${today}T12:00:00Z`) - Date.parse(`${expectedOn}T12:00:00Z`)) / 86_400_000
+				)
+			: 0
+	);
 </script>
 
 <div class="grid gap-6 pb-20">
@@ -278,7 +404,10 @@
 					: `${formatRs(b.ddpRatePerKg)}/kg`}
 				{#if b.paidOn}· ordered {fmtShort(b.paidOn)}{/if}
 				{#if expectedOn && b.status !== 'landed'}· expected {fmtShort(expectedOn)}{/if}
-				{#if overdue}<StatusBadge tone="warning" label="overdue" />{/if}
+				{#if overdue}<StatusBadge
+						tone="warning"
+						label="{lateDays} {lateDays === 1 ? 'day' : 'days'} late"
+					/>{/if}
 				{#if b.landedOn}· arrived {fmtShort(b.landedOn)}{/if}
 			</p>
 		</div>
@@ -294,6 +423,13 @@
 					>{busy === 'land' ? 'Retrying…' : 'Retry adding to stock'}</Button
 				>
 			</form>
+		{/if}
+		{#if b.status === 'landed'}
+			{#if correcting}
+				<Button variant="ghost" onclick={stopCorrecting}>Cancel correction</Button>
+			{:else}
+				<Button variant="outline" onclick={() => (correcting = true)}><Pencil /> Correct</Button>
+			{/if}
 		{/if}
 		{#if !locked}
 			<div class="flex flex-wrap items-end gap-2">
@@ -346,6 +482,7 @@
 						/>
 						<Button
 							type="submit"
+							class="bg-success text-white hover:bg-success/90 dark:text-background"
 							disabled={!!busy || !data.lines.length || !data.shipment.transportSet}
 							title={!data.shipment.transportSet
 								? 'Enter the transport first (per kg or fixed bill)'
@@ -358,6 +495,26 @@
 			</div>
 		{/if}
 	</div>
+
+	{#if overdue && expectedOn}
+		<div class="rounded-lg border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
+			<span class="font-medium text-warning"
+				>{lateDays} {lateDays === 1 ? 'day' : 'days'} past the expected arrival</span
+			>
+			({fmtShort(expectedOn)}). Contact the forwarder / supplier{b.supplier
+				? ` (${b.supplier})`
+				: ''}
+			— if it's just delayed, update “Expected in (days)” under Edit so the shop shows the new date.
+		</div>
+	{/if}
+
+	{#if correcting}
+		<div class="rounded-lg border border-info/40 bg-info-soft px-4 py-3 text-sm">
+			<span class="font-medium">Correcting this arrived purchase.</span> Change quantities, prices,
+			weights or the transport, then <b>Review correction</b> — you'll see the stock and cost changes
+			before anything is saved. Shopify only gets the differences.
+		</div>
+	{/if}
 
 	<Card.Root size="sm">
 		<Card.Content>
@@ -444,6 +601,30 @@
 		</Card.Content>
 	</Card.Root>
 
+	{#if data.corrections.length}
+		<Card.Root size="sm" class="border-info/40">
+			<Card.Header><Card.Title>Corrections after arrival</Card.Title></Card.Header>
+			<Card.Content class="grid gap-3 text-sm">
+				{#each data.corrections as c (c.at)}
+					<div>
+						<div class="text-xs text-muted-foreground">
+							{new Date(c.at).toLocaleString('en-GB', {
+								day: 'numeric',
+								month: 'short',
+								year: 'numeric',
+								hour: '2-digit',
+								minute: '2-digit'
+							})}{c.shopifyFixed ? ' · Shopify stock had been fixed by hand' : ''}
+						</div>
+						<ul class="mt-0.5 list-disc pl-5">
+							{#each c.lines as line, i (i)}<li>{line}</li>{/each}
+						</ul>
+					</div>
+				{/each}
+			</Card.Content>
+		</Card.Root>
+	{/if}
+
 	<Card.Root>
 		<Card.Header class="flex flex-row flex-wrap items-center justify-between gap-2">
 			<div class="grid gap-1">
@@ -523,7 +704,7 @@
 									</div>
 								</div>
 							</Table.Cell>
-							{#if locked}
+							{#if !canEdit}
 								<Table.Cell class="num text-right">{l.qty}</Table.Cell>
 								<Table.Cell class="num text-right"
 									>{(l.unitPriceForeignMinor / 100).toLocaleString('en-PK')}</Table.Cell
@@ -638,11 +819,13 @@
 		</Card.Content>
 	</Card.Root>
 
-	<Card.Root class={!data.shipment.transportSet && !locked ? 'border-warning/40' : ''}>
+	<Card.Root class={!data.shipment.transportSet && canEdit ? 'border-warning/40' : ''}>
 		<Card.Header>
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<Card.Title>Transport</Card.Title>
-				{#if !locked}
+				{#if correcting && shipDirty}
+					<StatusBadge tone="warning" label="Part of the correction" />
+				{:else if !locked}
 					{#if shipDirty}
 						<StatusBadge tone="warning" label="Not applied yet" />
 					{:else if data.shipment.ddpPending}
@@ -664,7 +847,7 @@
 				use:enhance={act('shipment', () => (shipEdit = null))}
 				class="grid gap-5"
 			>
-				<fieldset disabled={locked} class="contents">
+				<fieldset disabled={!canEdit} class="contents">
 					<input type="hidden" name="mode" value={ship.mode} />
 					<input type="hidden" name="split" value={ship.split} />
 
@@ -960,6 +1143,146 @@
 		</Dialog.Content>
 	</Dialog.Root>
 
+	<Dialog.Root bind:open={correctOpen}>
+		<Dialog.Content class="sm:max-w-2xl">
+			<Dialog.Header>
+				<Dialog.Title>Correct “{b.ref}”?</Dialog.Title>
+				<Dialog.Description>
+					Updates this purchase, the stock and the costs. <span class="font-medium text-warning"
+						>Check the changes below carefully.</span
+					>
+				</Dialog.Description>
+			</Dialog.Header>
+			{#if preview}
+				<div class="grid gap-3 text-sm">
+					<div class="grid grid-cols-3 gap-x-6 rounded-lg bg-muted/50 px-3 py-2">
+						{#each [['Units', String(preview.units[0]), String(preview.units[1])], ['Transport', formatRs(preview.ddp[0]), formatRs(preview.ddp[1])], ['Landed total', formatRs(preview.landed[0]), formatRs(preview.landed[1])]] as [label, from, to] (label)}
+							<div>
+								<div class="text-xs text-muted-foreground">{label}</div>
+								<div class="num font-medium">
+									{#if from === to}{to}{:else}<span class="text-muted-foreground line-through"
+											>{from}</span
+										>
+										{to}{/if}
+								</div>
+							</div>
+						{/each}
+					</div>
+					<div class="max-h-72 overflow-auto rounded-lg border">
+						<table class="w-full text-sm">
+							<thead class="sticky top-0 bg-background text-xs text-muted-foreground">
+								<tr>
+									<th class="px-3 py-1.5 text-left font-normal">Product</th>
+									<th class="px-2 py-1.5 text-right font-normal">Qty</th>
+									<th class="px-3 py-1.5 text-right font-normal">Cost</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each edited.length ? edited : preview.lines as l (l.id)}
+									{@const [product, variant] = split(l.title)}
+									<tr class="border-t">
+										<td class="max-w-72 px-3 py-1.5">
+											<div class="flex items-center gap-2">
+												<Thumb src={l.imageUrl} alt={l.title} size={32} />
+												<div class="min-w-0">
+													<div class="truncate" title={l.title}>{product}</div>
+													{#if variant}<div class="truncate text-xs text-muted-foreground">
+															{variant}
+														</div>{/if}
+													{#if l.price[0] !== l.price[1]}<div class="text-xs text-muted-foreground">
+															Price {sym}{l.price[0] / 100} → {sym}{l.price[1] / 100}
+														</div>{/if}
+													{#if l.weight[0] !== l.weight[1]}<div class="text-xs text-info">
+															Weight {l.weight[0]} g → {l.weight[1]} g (also in Shopify)
+														</div>{/if}
+												</div>
+											</div>
+										</td>
+										<td class="num px-2 py-1.5 text-right whitespace-nowrap">
+											{#if l.qtyDelta}
+												{l.qty[0]} → <b>{l.qty[1]}</b>
+												{#if shopifyFixed}<div class="text-xs text-muted-foreground">
+														Shopify already done
+													</div>{:else}<div
+														class={['text-xs', l.qtyDelta > 0 ? 'text-success' : 'text-danger']}
+													>
+														{l.qtyDelta > 0 ? '+' : ''}{l.qtyDelta} in Shopify
+													</div>{/if}
+											{:else}{l.qty[1]}{/if}
+										</td>
+										<td class="num px-3 py-1.5 text-right whitespace-nowrap">
+											{#if l.avg[0] !== l.avg[1]}{formatRs(l.avg[0])} →
+												<b>{formatRs(l.avg[1])}</b>{:else}<span class="text-muted-foreground"
+													>no change</span
+												>{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+					{#if edited.length && shifted.length}
+						<p class="text-xs text-muted-foreground">
+							{shifted.length} other {shifted.length === 1 ? 'line' : 'lines'}: cost moves by at
+							most {formatRs(maxShift)} each — their share of the transport changes with the new weights
+							/ values.
+						</p>
+					{/if}
+
+					{#if moved.length}
+						<label class="flex items-start gap-2 rounded-lg border px-3 py-2">
+							<input type="checkbox" bind:checked={shopifyFixed} class="mt-0.5 size-4" />
+							<span>
+								<span class="font-medium">I already fixed the stock in Shopify by hand</span>
+								<span class="block text-xs text-muted-foreground">
+									{#if shopifyFixed}
+										Shopify stock is left alone.
+										{#each moved as l (l.id)}
+											<span class="block"
+												>{l.title}: {l.match
+													? `the matching stock change (${l.qtyDelta > 0 ? '+' : ''}${l.qtyDelta}${l.match.reason ? `, marked ${l.match.reason}` : ''}) will be removed`
+													: 'no matching stock change found yet — fine if the panel has not synced since'}</span
+											>
+										{/each}
+									{:else}
+										Shopify stock will change by the differences shown above.
+									{/if}
+								</span>
+							</span>
+						</label>
+					{/if}
+
+					<div class="grid gap-1.5">
+						<Label for="correctCheck"
+							>{unitDelta !== 0
+								? `Type the unit change (${confirmCode}) to confirm`
+								: `Type the number of lines changing (${confirmCode}) to confirm`}</Label
+						>
+						<Input
+							id="correctCheck"
+							bind:value={correctTyped}
+							inputmode="numeric"
+							autocomplete="off"
+							class="w-40"
+							onkeydown={(ev) => {
+								if (ev.key === 'Enter' && correctOk && !busy) {
+									ev.preventDefault();
+									applyCorrection();
+								}
+							}}
+						/>
+					</div>
+				</div>
+			{/if}
+			<Dialog.Footer>
+				<Button variant="ghost" onclick={() => (correctOpen = false)}>Back</Button>
+				<Button disabled={!correctOk || !!busy} onclick={applyCorrection}
+					>{busy === 'correct' ? 'Correcting…' : 'Apply correction'}</Button
+				>
+			</Dialog.Footer>
+		</Dialog.Content>
+	</Dialog.Root>
+
 	<ProductPickerDialog
 		bind:open={pickerOpen}
 		options={data.options}
@@ -1008,7 +1331,19 @@
 	{/if}
 </div>
 
-{#if dirty}
+{#if correcting && (dirty || shipDirty)}
+	<div
+		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
+	>
+		<span class="text-sm text-muted-foreground"
+			>{dirty} changed line{dirty === 1 ? '' : 's'}{shipDirty ? ' · transport changed' : ''}</span
+		>
+		<Button variant="ghost" onclick={stopCorrecting}>Discard</Button>
+		<Button disabled={!!busy} onclick={reviewCorrection}
+			>{busy === 'preview' ? 'Checking…' : 'Review correction'}</Button
+		>
+	</div>
+{:else if dirty}
 	<form
 		method="POST"
 		action={formAction('items')}
