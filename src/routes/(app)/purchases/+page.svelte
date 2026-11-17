@@ -11,6 +11,7 @@
 	import { Label } from '#lib/components/ui/label/index.js';
 	import Money from '#lib/components/app/money.svelte';
 	import StatusBadge from '#lib/components/app/status-badge.svelte';
+	import { page } from '$app/state';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -21,7 +22,7 @@
 		draft: { tone: 'muted', label: 'draft' },
 		paid: { tone: 'info', label: 'purchased · incoming' },
 		landing: { tone: 'warning', label: 'adding to stock…' },
-		landed: { tone: 'success', label: 'landed' }
+		landed: { tone: 'success', label: 'arrived' }
 	} as const;
 	const fmtDate = (d: string | null) =>
 		d
@@ -31,6 +32,17 @@
 					year: 'numeric'
 				})
 			: '—';
+
+	/** Stage tabs; All is the default. */
+	const TABS = [
+		{ id: 'all', label: 'All', has: () => true },
+		{ id: 'draft', label: 'Draft', has: (st: string) => st === 'draft' },
+		{ id: 'incoming', label: 'Incoming', has: (st: string) => st === 'paid' || st === 'landing' },
+		{ id: 'arrived', label: 'Arrived', has: (st: string) => st === 'landed' }
+	] as const;
+	const tab = $derived(TABS.find((t) => t.id === page.url.searchParams.get('tab')) ?? TABS[0]);
+	const shown = $derived(data.batches.filter((b) => tab.has(b.status)));
+	const count = (t: (typeof TABS)[number]) => data.batches.filter((b) => t.has(b.status)).length;
 </script>
 
 <div class="grid gap-6">
@@ -46,6 +58,18 @@
 	</div>
 
 	<Card.Root>
+		<Card.Header class="pb-0" data-sveltekit-noscroll>
+			<div class="flex flex-wrap gap-1">
+				{#each TABS as t (t.id)}
+					<Button
+						href={t.id === 'all' ? '?' : `?tab=${t.id}`}
+						size="sm"
+						variant={tab.id === t.id ? 'secondary' : 'ghost'}
+						data-sveltekit-replacestate>{t.label} ({count(t)})</Button
+					>
+				{/each}
+			</div>
+		</Card.Header>
 		<Card.Content class="overflow-x-auto px-0">
 			<Table.Root>
 				<Table.Header>
@@ -61,7 +85,7 @@
 					</Table.Row>
 				</Table.Header>
 				<Table.Body>
-					{#each data.batches as b (b.id)}
+					{#each shown as b (b.id)}
 						<Table.Row>
 							<Table.Cell class="pl-6">
 								<a href="/purchases/{b.id}" class="font-medium hover:underline">{b.ref}</a>
@@ -101,7 +125,9 @@
 					{:else}
 						<Table.Row>
 							<Table.Cell colspan={8} class="py-10 text-center text-muted-foreground">
-								No purchases yet. Stock you already have is costed on the Inventory page.
+								{data.batches.length
+									? `No ${tab.label.toLowerCase()} purchases.`
+									: 'No purchases yet. Stock you already have is costed on the Inventory page.'}
 							</Table.Cell>
 						</Table.Row>
 					{/each}
