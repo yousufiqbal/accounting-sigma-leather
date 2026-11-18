@@ -269,7 +269,8 @@ export async function landBatch(id: string, landedOn: string) {
 	if (!b.lines.length) throw new Error('Add items first.');
 	if (b.batch.currency !== 'PKR' && !b.batch.fxRateX10000)
 		throw new Error('Enter the exchange rate.');
-	if (b.lines.some((l) => l.qty <= 0)) throw new Error('Every item needs a quantity.');
+	if (b.lines.some((l) => l.qty <= 0 || l.unitPriceForeignMinor <= 0))
+		throw new Error('Every item needs a quantity and a price.');
 	if (!b.shipment.transportSet)
 		throw new Error('Enter the transport first — per kg (rate and box weight) or a fixed bill.');
 	if (!b.shipment.fixed && b.shipment.ddpTotal && b.shipment.itemsWithoutWeight)

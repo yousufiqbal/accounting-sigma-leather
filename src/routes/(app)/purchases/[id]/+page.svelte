@@ -12,6 +12,8 @@
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
+	import TrendingUp from '@lucide/svelte/icons/trending-up';
+	import TrendingDown from '@lucide/svelte/icons/trending-down';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Card from '#lib/components/ui/card/index.js';
 	import * as Dialog from '#lib/components/ui/dialog/index.js';
@@ -68,6 +70,15 @@
 		china: string;
 	} | null>(null);
 	const ship = $derived(shipEdit ?? shipSaved);
+	/** Transport inputs show until it's applied; after that only on Edit (or while changed). */
+	let shipOpen = $state(false);
+	const shipForm = $derived(
+		canEdit && (!data.shipment.transportSet || shipOpen || shipEdit !== null)
+	);
+	function closeShip() {
+		shipEdit = null;
+		shipOpen = false;
+	}
 	const num = (x: string) => (x.trim() === '' ? null : Number(x.replace(/,/g, '')));
 	/** Per kg: live bill total while typing (paisa). */
 	/** What the transport card shows, live from the inputs (saved or being typed). */
@@ -141,7 +152,7 @@
 	let arriveTyped = $state('');
 	let arriveConfirmed = false;
 	let arriveForm = $state<HTMLFormElement>();
-	let arriveDate = $state(today);
+	const arriveDate = today;
 	const arrivePlan = $derived(
 		data.lines.map((l) => {
 			const have = Math.max(0, l.variant?.onHand ?? 0);
@@ -167,6 +178,22 @@
 		const n = Number(x.replace(/,/g, ''));
 		return Number.isFinite(n) ? n : 0;
 	};
+	/** Every line needs a quantity and a price; lines without them are not saved. */
+	const missing = (e: Edit) => !(liveNum(e.qty) > 0) || !(liveNum(e.price) > 0);
+	const incomplete = $derived(data.lines.filter((l) => missing(cur(l))).length);
+	const validEdits = $derived(Object.entries(edits).filter(([, x]) => !missing(x)));
+	const invalidEdits = $derived(Object.keys(edits).length - validEdits.length);
+	/**
+	 * Landed cost far from the cost before (≥ 30% up or down): worth a second look at the price,
+	 * weight or quantity. Before arrival it compares with the current cost; after, with the cost
+	 * the item had when this purchase arrived.
+	 */
+	function costJump(l: Line) {
+		const base = locked ? l.oldCostAtLand : l.variant?.avgCost;
+		if (!base || base <= 0 || !l.landed) return null;
+		const pct = (l.landed - base) / base;
+		return Math.abs(pct) >= 0.3 ? { pct, base } : null;
+	}
 	const liveUnits = $derived(data.lines.reduce((t, l) => t + liveNum(cur(l).qty), 0));
 	/** Item weight in grams (unit weight × qty), live. */
 	const liveGrams = $derived(
@@ -179,6 +206,8 @@
 		)
 	);
 	const liveChina = $derived(isRmb ? (num(ship.china) ?? 0) : 0);
+	/** China shipping in Rs (live). */
+	const chinaRs = $derived(Math.round((liveChina * b.fxRateX10000) / 100));
 	/** Items table: Enter → same column, next row (Shift+Enter → previous row). */
 	function nextRow(ev: KeyboardEvent) {
 		if (ev.key !== 'Enter') return;
@@ -302,6 +331,7 @@
 				correctOpen = false;
 				edits = {};
 				shipEdit = null;
+				shipOpen = false;
 				correcting = false;
 				await invalidateAll();
 			}
@@ -313,6 +343,7 @@
 	function stopCorrecting() {
 		edits = {};
 		shipEdit = null;
+		shipOpen = false;
 		correcting = false;
 	}
 	let leaving = false;
@@ -382,7 +413,7 @@
 
 <div class="grid gap-6 pb-20">
 	<div class="flex flex-wrap items-end justify-between gap-3">
-		<div>
+		<div class="min-w-0 flex-1">
 			<a
 				href="/purchases"
 				class="mb-1 inline-flex items-center gap-1 text-sm text-muted-foreground hover:underline"
@@ -396,20 +427,6 @@
 						label="Transport pending"
 					/>{/if}
 			</h1>
-			<p class="text-sm text-muted-foreground">
-				{b.supplier ?? 'No supplier'} ·
-				{isRmb ? `¥1 = Rs ${b.fxRateX10000 / 10_000}` : 'Pakistani supplier (Rs)'} · Transport {data
-					.shipment.fixed
-					? `${formatRs(data.shipment.ddpTotal ?? 0)} bill`
-					: `${formatRs(b.ddpRatePerKg)}/kg`}
-				{#if b.paidOn}· ordered {fmtShort(b.paidOn)}{/if}
-				{#if expectedOn && b.status !== 'landed'}· expected {fmtShort(expectedOn)}{/if}
-				{#if overdue}<StatusBadge
-						tone="warning"
-						label="{lateDays} {lateDays === 1 ? 'day' : 'days'} late"
-					/>{/if}
-				{#if b.landedOn}· arrived {fmtShort(b.landedOn)}{/if}
-			</p>
 		</div>
 		{#if retrying}
 			<form
@@ -432,22 +449,17 @@
 			{/if}
 		{/if}
 		{#if !locked}
-			<div class="flex flex-wrap items-end gap-2">
+			<div class="ml-auto flex flex-wrap items-end gap-2">
 				{#if b.status === 'draft'}
 					<form method="POST" action={formAction('paid')} use:enhance={act('paid')}>
-						<Button type="submit" disabled={!!busy || !data.lines.length}
+						<Button
+							type="submit"
+							disabled={!!busy || !data.lines.length || incomplete > 0}
+							title={incomplete ? `${incomplete} items need a quantity and price` : undefined}
 							>{busy === 'paid' ? 'Saving…' : 'Mark purchased'}</Button
 						>
 					</form>
 				{:else}
-					<form
-						method="POST"
-						action={formAction('draft')}
-						use:enhance={act('draft')}
-						class="flex items-end"
-					>
-						<Button type="submit" variant="ghost" disabled={!!busy}>Back to draft</Button>
-					</form>
 					<form
 						method="POST"
 						action={formAction('land')}
@@ -473,20 +485,20 @@
 							return act('land')();
 						}}
 					>
-						<Input
-							type="date"
-							name="date"
-							bind:value={arriveDate}
-							class="h-9 w-40"
-							aria-label="Arrived on"
-						/>
+						<!-- Arrived on = the day the button is clicked. -->
+						<input type="hidden" name="date" value={today} />
 						<Button
 							type="submit"
 							class="bg-success text-white hover:bg-success/90 dark:text-background"
-							disabled={!!busy || !data.lines.length || !data.shipment.transportSet}
-							title={!data.shipment.transportSet
-								? 'Enter the transport first (per kg or fixed bill)'
-								: undefined}
+							disabled={!!busy ||
+								!data.lines.length ||
+								!data.shipment.transportSet ||
+								incomplete > 0}
+							title={incomplete
+								? `${incomplete} items need a quantity and price`
+								: !data.shipment.transportSet
+									? 'Enter the transport first (per kg or fixed bill)'
+									: undefined}
 						>
 							{busy === 'land' ? 'Adding to stock…' : 'Mark arrived — add to stock'}
 						</Button>
@@ -520,7 +532,7 @@
 		<Card.Content>
 			{#if !editingHeader}
 				<div class="flex flex-wrap items-start gap-x-8 gap-y-3 text-sm">
-					{#each [['Name', b.ref], ['Supplier', b.supplier], ...(isRmb ? [['Rs per 1 yuan', String(b.fxRateX10000 / 10_000)]] : []), ...(b.paidOn ? [['Ordered on', fmtShort(b.paidOn)]] : []), ['Expected', expectedOn ? `${fmtShort(expectedOn)} (${b.expectedDays} days)${overdue ? ' — overdue' : ''}` : null], ['Notes', b.notes]] as [label, value] (label)}
+					{#each [['Name', b.ref], ['Supplier', b.supplier], ...(isRmb ? [['Rs per 1 yuan', String(b.fxRateX10000 / 10_000)]] : []), ...(b.paidOn ? [['Ordered on', fmtShort(b.paidOn)]] : []), ...(b.landedOn ? [['Arrived on', fmtShort(b.landedOn)]] : []), ['Expected', expectedOn ? `${fmtShort(expectedOn)} (${b.expectedDays} days)${overdue ? ' — overdue' : ''}` : null], ['Notes', b.notes]] as [label, value] (label)}
 						<div class={['grid gap-0.5', label === 'Notes' && 'min-w-0 flex-1']}>
 							<span class="text-xs text-muted-foreground">{label}</span>
 							<span class={['font-medium', !value && 'text-muted-foreground']}>{value || '—'}</span>
@@ -721,7 +733,10 @@
 											set(l, { qty: clean });
 										}}
 										inputmode="numeric"
-										class="ml-auto h-8 w-16 text-right"
+										class={[
+											'ml-auto h-8 w-16 text-right',
+											!(liveNum(e.qty) > 0) && 'border-danger'
+										]}
 										aria-label="Quantity"
 										data-col="qty"
 										onkeydown={nextRow}
@@ -732,7 +747,10 @@
 										value={e.price}
 										oninput={(ev) => set(l, { price: ev.currentTarget.value })}
 										inputmode="decimal"
-										class="ml-auto h-8 w-20 text-right"
+										class={[
+											'ml-auto h-8 w-20 text-right',
+											!(liveNum(e.price) > 0) && 'border-danger'
+										]}
 										aria-label="Price"
 										data-col="price"
 										onkeydown={nextRow}
@@ -752,9 +770,34 @@
 							{/if}
 							<Table.Cell class="text-right"><Money paisa={l.goods} /></Table.Cell>
 							<Table.Cell class="text-right"><Money paisa={l.ddp} muted /></Table.Cell>
-							<Table.Cell class="text-right font-medium"><Money paisa={l.landed} /></Table.Cell>
+							<Table.Cell class="text-right font-medium">
+								<Money paisa={l.landed} />
+								{@const jump = costJump(l)}
+								{#if jump}
+									<div
+										class={[
+											'flex items-center justify-end gap-0.5 text-xs font-normal',
+											jump.pct > 0 ? 'text-danger' : 'text-info'
+										]}
+										title="{jump.pct > 0 ? 'Up' : 'Down'} {Math.round(
+											Math.abs(jump.pct) * 100
+										)}% from {formatRs(jump.base)} — check price, weight and quantity"
+									>
+										{#if jump.pct > 0}<TrendingUp class="size-3" />{:else}<TrendingDown
+												class="size-3"
+											/>{/if}
+										{jump.pct > 0 ? '+' : '−'}{Math.round(Math.abs(jump.pct) * 100)}%
+									</div>
+								{/if}
+							</Table.Cell>
 							<Table.Cell class="text-right text-muted-foreground">
-								{#if !locked && l.variant}<Money paisa={l.variant.avgCost} muted />{:else}—{/if}
+								{#if !locked && l.variant}<Money
+										paisa={l.variant.avgCost}
+										muted
+									/>{:else if locked && l.oldCostAtLand}<Money
+										paisa={l.oldCostAtLand}
+										muted
+									/>{:else}—{/if}
 							</Table.Cell>
 							<Table.Cell class="pr-6 text-right">
 								<div class="flex items-center justify-end gap-1">
@@ -823,194 +866,232 @@
 		<Card.Header>
 			<div class="flex flex-wrap items-center justify-between gap-2">
 				<Card.Title>Transport</Card.Title>
-				{#if correcting && shipDirty}
-					<StatusBadge tone="warning" label="Part of the correction" />
-				{:else if !locked}
-					{#if shipDirty}
-						<StatusBadge tone="warning" label="Not applied yet" />
-					{:else if data.shipment.ddpPending}
-						<StatusBadge tone="warning" label="Pending — enter box weight" />
-					{:else if !data.shipment.transportSet}
-						<StatusBadge tone="warning" label="Required before arrival" />
-					{:else}
-						<span class="flex items-center gap-1.5 text-sm text-success"
-							><CircleCheck class="size-4" /> Applied to items</span
+				<div class="flex items-center gap-3">
+					{#if correcting && shipDirty}
+						<StatusBadge tone="warning" label="Part of the correction" />
+					{:else if !locked}
+						{#if shipDirty}
+							<StatusBadge tone="warning" label="Not applied yet" />
+						{:else if data.shipment.ddpPending}
+							<StatusBadge tone="warning" label="Pending — enter box weight" />
+						{:else if !data.shipment.transportSet}
+							<StatusBadge tone="warning" label="Required before arrival" />
+						{:else}
+							<span class="flex items-center gap-1.5 text-sm text-success"
+								><CircleCheck class="size-4" /> Applied to items</span
+							>
+						{/if}
+					{/if}
+					{#if canEdit && !shipForm}
+						<Button variant="ghost" size="sm" onclick={() => (shipOpen = true)}
+							><Pencil /> Edit</Button
 						>
 					{/if}
-				{/if}
+				</div>
 			</div>
 		</Card.Header>
 		<Card.Content>
 			<form
 				method="POST"
 				action={formAction('shipment')}
-				use:enhance={act('shipment', () => (shipEdit = null))}
+				use:enhance={act('shipment', closeShip)}
 				class="grid gap-5"
 			>
 				<fieldset disabled={!canEdit} class="contents">
 					<input type="hidden" name="mode" value={ship.mode} />
 					<input type="hidden" name="split" value={ship.split} />
 
-					{#if isRmb}
-						<div class="grid gap-1.5">
-							<Label for="china"
-								>China shipping (¥) <span class="font-normal text-muted-foreground"
-									>— supplier → forwarder, optional</span
-								></Label
-							>
-							<div class="flex items-center gap-3">
-								<Input
-									id="china"
-									name="china"
-									inputmode="decimal"
-									class="w-32"
-									value={ship.china}
-									oninput={(ev) => (shipEdit = { ...ship, china: ev.currentTarget.value })}
-									placeholder="e.g. 25"
-								/>
-								{#if num(ship.china)}
-									<span class="num text-sm text-muted-foreground"
-										>= {formatRs(Math.round(((num(ship.china) ?? 0) * b.fxRateX10000) / 100))}</span
-									>
-								{/if}
-							</div>
+					{#if !shipForm}
+						<!-- Applied: the figures only; Edit opens the form. -->
+						<input type="hidden" name="china" value={ship.china} />
+						<div class="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:grid-cols-5">
+							{@render fact('Charged', data.shipment.fixed ? 'Fixed bill' : 'Per kg')}
+							{#if data.shipment.fixed}
+								{@render fact('Bill', formatRs(data.shipment.ddpTotal ?? 0))}
+								{@render fact('Shared by', data.shipment.split === 'value' ? 'Price' : 'Weight')}
+							{:else}
+								{@render fact('Billed box weight', `${ship.kg} kg`)}
+								{@render fact('Rate', `${formatRs(b.ddpRatePerKg)} / kg`)}
+							{/if}
+							{#if isRmb}
+								{@render fact(
+									'China shipping',
+									num(ship.china) ? `¥${num(ship.china)} · ${formatRs(chinaRs)}` : '—'
+								)}
+							{/if}
+							{@render fact('Transport total', formatRs((live.total ?? 0) + chinaRs), true)}
 						</div>
+						{@render notes()}
 					{:else}
-						<input type="hidden" name="china" value="" />
-					{/if}
-
-					<div class="grid gap-1.5">
-						<span class="text-sm font-medium">How was transport charged?</span>
-						<div class="flex flex-wrap items-center gap-3">
-							{@render segmented(
-								[
-									['perkg', 'Per kg'],
-									['fixed', 'Fixed bill']
-								],
-								ship.mode,
-								(m) => (shipEdit = { ...ship, mode: m as ShipMode })
-							)}
-							<span class="text-xs text-muted-foreground">
-								{ship.mode === 'fixed'
-									? 'e.g. local carriage — one amount for the whole purchase'
-									: 'billed box weight × rate, shared by item weight'}
-							</span>
-						</div>
-					</div>
-
-					<div class="flex flex-wrap items-end gap-x-4 gap-y-4">
-						{#if ship.mode === 'fixed'}
-							<div class="grid gap-1.5">
-								<Label for="bill">Bill amount (Rs)</Label>
-								<Input
-									id="bill"
-									name="bill"
-									inputmode="decimal"
-									class="w-36"
-									value={ship.bill}
-									oninput={(ev) => (shipEdit = { ...ship, bill: ev.currentTarget.value })}
-									placeholder="e.g. 1500"
-								/>
-							</div>
-							<div class="grid gap-1.5">
-								<span class="text-sm font-medium">Share it by</span>
+						<div class="grid gap-1.5">
+							<span class="text-sm font-medium">How was transport charged?</span>
+							<div class="flex flex-wrap items-center gap-3">
 								{@render segmented(
 									[
-										['weight', 'Weight'],
-										['value', 'Price']
+										['perkg', 'Per kg'],
+										['fixed', 'Fixed bill']
 									],
-									ship.split,
-									(m) => (shipEdit = { ...ship, split: m as 'weight' | 'value' })
+									ship.mode,
+									(m) => (shipEdit = { ...ship, mode: m as ShipMode })
 								)}
+								<span class="text-xs text-muted-foreground">
+									{ship.mode === 'fixed'
+										? 'e.g. local carriage — one amount for the whole purchase'
+										: 'billed box weight × rate, shared by item weight'}
+								</span>
 							</div>
-							<span class="pb-2 text-xs text-muted-foreground">
-								{ship.split === 'value'
-									? 'costlier items carry more of the bill'
-									: 'heavier items carry more of the bill'}
-							</span>
-						{:else}
-							<div class="grid gap-1.5">
-								<Label for="billedKg">Billed box weight (kg)</Label>
-								<Input
-									id="billedKg"
-									name="billedKg"
-									inputmode="decimal"
-									class="w-36"
-									value={ship.kg}
-									oninput={(ev) => (shipEdit = { ...ship, kg: ev.currentTarget.value })}
-									placeholder="when boxes arrive"
-								/>
-							</div>
-							<span class="pb-2 text-muted-foreground">×</span>
-							<div class="grid gap-1.5">
-								<Label for="ddp">Rate per kg (Rs)</Label>
-								<Input
-									id="ddp"
-									name="ddp"
-									inputmode="decimal"
-									class="w-32"
-									value={ship.rate}
-									oninput={(ev) => (shipEdit = { ...ship, rate: ev.currentTarget.value })}
-								/>
-							</div>
-						{/if}
-					</div>
+						</div>
 
-					<div
-						class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 px-4 py-3 text-sm"
-					>
-						<div class="grid gap-0.5">
-							<div>
+						<div class="flex flex-wrap items-end gap-x-4 gap-y-4">
+							{#if ship.mode === 'fixed'}
+								<div class="grid gap-1.5">
+									<Label for="bill">Bill amount (Rs)</Label>
+									<Input
+										id="bill"
+										name="bill"
+										inputmode="decimal"
+										class="w-36"
+										value={ship.bill}
+										oninput={(ev) => (shipEdit = { ...ship, bill: ev.currentTarget.value })}
+										placeholder="e.g. 1500"
+									/>
+								</div>
+								<div class="grid gap-1.5">
+									<span class="text-sm font-medium">Share it by</span>
+									{@render segmented(
+										[
+											['weight', 'Weight'],
+											['value', 'Price']
+										],
+										ship.split,
+										(m) => (shipEdit = { ...ship, split: m as 'weight' | 'value' })
+									)}
+								</div>
+							{:else}
+								<div class="grid gap-1.5">
+									<Label for="billedKg">Billed box weight (kg)</Label>
+									<Input
+										id="billedKg"
+										name="billedKg"
+										inputmode="decimal"
+										class="w-36"
+										value={ship.kg}
+										oninput={(ev) => (shipEdit = { ...ship, kg: ev.currentTarget.value })}
+										placeholder="when boxes arrive"
+									/>
+								</div>
+								<span class="pb-2 text-muted-foreground">×</span>
+								<div class="grid gap-1.5">
+									<Label for="ddp">Rate per kg (Rs)</Label>
+									<Input
+										id="ddp"
+										name="ddp"
+										inputmode="decimal"
+										class="w-32"
+										value={ship.rate}
+										oninput={(ev) => (shipEdit = { ...ship, rate: ev.currentTarget.value })}
+									/>
+								</div>
+							{/if}
+							<span class="num pb-2 text-sm">
+								=
 								{#if live.total === null}
 									<span class="text-warning"
-										>~{formatRs(data.totals.ddp - data.totals.china)} estimated from item weights — enter
-										the billed box weight when the boxes arrive</span
+										>~{formatRs(data.totals.ddp - data.totals.china)} estimated</span
 									>
-								{:else if live.total === 0}
-									No transport on this purchase.
 								{:else}
-									<b class="num text-base">{formatRs(live.total)}</b> shared across the items by
-									<b>{live.split === 'value' ? 'price' : 'weight'}</b>
+									<b>{formatRs(live.total)}</b>
 								{/if}
-							</div>
-							{#if isRmb && num(ship.china)}
-								<div>
-									+ <b class="num">¥{num(ship.china)}</b> China shipping
-									<span class="text-muted-foreground"
-										>(= {formatRs(Math.round(((num(ship.china) ?? 0) * b.fxRateX10000) / 100))}),
-										shared by {data.shipment.itemsWithoutWeight ? 'price' : 'weight'}</span
-									>
-								</div>
-							{/if}
-							{#if live.fallback}
-								<div class="text-xs text-warning">
-									{data.shipment.itemsWithoutWeight} items have no weight, so it's shared by price.
-								</div>
-							{/if}
-							{#if live.overhead !== null}
-								<div
-									class={['text-xs', live.overhead < 0 ? 'text-danger' : 'text-muted-foreground']}
+							</span>
+						</div>
+
+						{#if isRmb}
+							<div class="grid gap-1.5 border-t pt-4">
+								<Label for="china"
+									>China shipping (¥) <span class="font-normal text-muted-foreground"
+										>— supplier → forwarder, optional</span
+									></Label
 								>
-									{live.overhead < 0
-										? "Billed weight is less than the items' weights — check the item weights."
-										: `Box is ${(live.overhead * 100).toFixed(0)}% heavier than the items (cartons, packing).`}
+								<div class="flex items-center gap-3">
+									<Input
+										id="china"
+										name="china"
+										inputmode="decimal"
+										class="w-32"
+										value={ship.china}
+										oninput={(ev) => (shipEdit = { ...ship, china: ev.currentTarget.value })}
+										placeholder="e.g. 25"
+									/>
+									{#if num(ship.china)}
+										<span class="num text-sm text-muted-foreground">= {formatRs(chinaRs)}</span>
+									{/if}
+								</div>
+							</div>
+						{:else}
+							<input type="hidden" name="china" value="" />
+						{/if}
+
+						<div
+							class="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-muted/50 px-4 py-3 text-sm"
+						>
+							<div class="grid gap-0.5">
+								<div>
+									{#if live.total === null}
+										<span class="text-warning"
+											>Enter the billed box weight when the boxes arrive.</span
+										>
+									{:else if live.total === 0 && !chinaRs}
+										No transport on this purchase.
+									{:else}
+										<b class="num text-base">{formatRs((live.total ?? 0) + chinaRs)}</b> shared
+										across the items by <b>{live.split === 'value' ? 'price' : 'weight'}</b>
+										{#if chinaRs}<span class="text-muted-foreground"
+												>(incl. {formatRs(chinaRs)} China shipping)</span
+											>{/if}
+									{/if}
+								</div>
+								{@render notes()}
+							</div>
+							{#if shipDirty || (shipOpen && data.shipment.transportSet)}
+								<div class="flex items-center gap-2">
+									<Button type="button" variant="ghost" onclick={closeShip}
+										>{shipDirty ? 'Undo' : 'Cancel'}</Button
+									>
+									{#if !locked && shipDirty}
+										<Button type="submit" disabled={!!busy}
+											>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button
+										>
+									{/if}
 								</div>
 							{/if}
 						</div>
-						{#if !locked && shipDirty}
-							<div class="flex items-center gap-2">
-								<Button type="button" variant="ghost" onclick={() => (shipEdit = null)}>Undo</Button
-								>
-								<Button type="submit" disabled={!!busy}
-									>{busy === 'shipment' ? 'Applying…' : 'Save & apply'}</Button
-								>
-							</div>
-						{/if}
-					</div>
+					{/if}
 				</fieldset>
 			</form>
 		</Card.Content>
 	</Card.Root>
+
+	{#snippet fact(label: string, value: string, strong = false)}
+		<div class="grid gap-0.5">
+			<span class="text-xs text-muted-foreground">{label}</span>
+			<span class={['num', strong ? 'font-semibold' : 'font-medium']}>{value}</span>
+		</div>
+	{/snippet}
+
+	{#snippet notes()}
+		{#if live.fallback}
+			<div class="text-xs text-warning">
+				{data.shipment.itemsWithoutWeight} items have no weight, so it's shared by price.
+			</div>
+		{/if}
+		{#if live.overhead !== null}
+			<div class={['text-xs', live.overhead < 0 ? 'text-danger' : 'text-muted-foreground']}>
+				{live.overhead < 0
+					? "Billed weight is less than the items' weights — check the item weights."
+					: `Box is ${(live.overhead * 100).toFixed(0)}% heavier than the items (cartons, packing).`}
+			</div>
+		{/if}
+	{/snippet}
 
 	<Dialog.Root bind:open={arriveOpen}>
 		<Dialog.Content class="sm:max-w-xl">
@@ -1028,7 +1109,7 @@
 				>
 					<div>
 						<div class="text-xs text-muted-foreground">Arrived on</div>
-						<div class="font-medium">{arriveDate}</div>
+						<div class="font-medium">{fmtShort(arriveDate)} (today)</div>
 					</div>
 					<div>
 						<div class="text-xs text-muted-foreground">Units</div>
@@ -1347,16 +1428,26 @@
 	<form
 		method="POST"
 		action={formAction('items')}
-		use:enhance={act('items', () => (edits = {}))}
+		use:enhance={act('items', () => {
+			// Lines still missing a quantity or price stay unsaved (and highlighted).
+			edits = Object.fromEntries(Object.entries(edits).filter(([, x]) => missing(x)));
+		})}
 		class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-end gap-3 border-t bg-background/95 px-6 py-3 backdrop-blur md:left-(--sidebar-width)"
 	>
 		<input
 			type="hidden"
 			name="rows"
-			value={JSON.stringify(Object.entries(edits).map(([id, x]) => ({ id, ...x })))}
+			value={JSON.stringify(validEdits.map(([id, x]) => ({ id, ...x })))}
 		/>
-		<span class="text-sm text-muted-foreground">{dirty} unsaved line{dirty === 1 ? '' : 's'}</span>
+		<span class="text-sm text-muted-foreground">
+			{dirty} unsaved line{dirty === 1 ? '' : 's'}
+			{#if invalidEdits}<span class="text-danger"
+					>· {invalidEdits} missing qty or price — won't be saved</span
+				>{/if}
+		</span>
 		<Button type="button" variant="ghost" onclick={() => (edits = {})}>Discard</Button>
-		<Button type="submit" disabled={!!busy}>{busy === 'items' ? 'Saving…' : 'Save items'}</Button>
+		<Button type="submit" disabled={!!busy || !validEdits.length}
+			>{busy === 'items' ? 'Saving…' : 'Save items'}</Button
+		>
 	</form>
 {/if}

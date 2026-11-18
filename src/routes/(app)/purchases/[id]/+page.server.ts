@@ -137,7 +137,9 @@ function parseCorrection(f: FormData): CorrectionInput {
 		const weight = Math.round(Number(r.weight) * 100) / 100;
 		if (!Number.isInteger(qty) || qty < 0 || !(weight >= 0))
 			throw new Error('Quantity must be a whole number; price and weight must be numbers.');
-		return { id: r.id, qty, price: Math.abs(toPaisa(r.price)), weight };
+		const price = Math.abs(toPaisa(r.price));
+		if (qty <= 0 || price <= 0) throw new Error('Every item needs a quantity and a price.');
+		return { id: r.id, qty, price, weight };
 	});
 	const raw = JSON.parse(String(f.get('ship') ?? 'null')) as Record<string, string> | null;
 	if (!raw) return { rows, ship: null };
@@ -364,7 +366,11 @@ export const actions: Actions = {
 				error: 'Quantity must be a whole number; price and weight must be numbers.'
 			});
 		}
-		if (!rows.length) return { saved: 'Nothing changed.' };
+		// Quantity and price are required: incomplete lines are not saved.
+		const skipped = rows.filter((r) => r.qty <= 0 || r.price <= 0).length;
+		rows = rows.filter((r) => r.qty > 0 && r.price > 0);
+		if (!rows.length)
+			return fail(400, { error: 'Enter a quantity and a price for every item — nothing saved.' });
 		const stmts = rows.map((r) =>
 			db
 				.update(bi)
@@ -372,7 +378,11 @@ export const actions: Actions = {
 				.where(and(eq(bi.id, r.id), eq(bi.batchId, params.id)))
 		);
 		await db.batch(stmts as [(typeof stmts)[0], ...typeof stmts]);
-		return { saved: `Saved ${rows.length} lines.` };
+		return {
+			saved:
+				`Saved ${rows.length} lines.` +
+				(skipped ? ` ${skipped} without a quantity or price were not saved.` : '')
+		};
 	},
 
 	remove: async ({ params, request }) => {
@@ -391,6 +401,12 @@ export const actions: Actions = {
 	paid: async ({ params }) => {
 		const batch = await editable(params.id);
 		if (!batch) return fail(400, LANDED);
+		const [gap] = (await db.all(sql`
+			select count(*) as n from batch_items
+			where batch_id = ${params.id} and (qty <= 0 or unit_price_foreign_minor <= 0)`)) as {
+			n: number;
+		}[];
+		if (gap?.n) return fail(400, { error: `${gap.n} items need a quantity and a price first.` });
 		const today = new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 		await db
 			.update(schema.importBatches)
