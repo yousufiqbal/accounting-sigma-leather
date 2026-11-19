@@ -53,15 +53,6 @@
 		t.setUTCDate(t.getUTCDate() + n);
 		return t.toISOString().slice(0, 10);
 	};
-	/** Days past the expected arrival for a purchased (not arrived) purchase; 0 = not late. */
-	const daysLate = (b: (typeof data.batches)[number]) => {
-		if (b.status !== 'paid' || !b.paidOn || b.expectedDays === null) return 0;
-		const due = addDays(b.paidOn, b.expectedDays);
-		if (due >= today) return 0;
-		return Math.round(
-			(Date.parse(`${today}T12:00:00Z`) - Date.parse(`${due}T12:00:00Z`)) / 86_400_000
-		);
-	};
 	/**
 	 * One thumbnail per variant (its own picture). Variants that
 	 * share the very same picture show it once.
@@ -137,10 +128,6 @@
 							</Table.Cell>
 							<Table.Cell>
 								<StatusBadge tone={STATUS[b.status].tone} label={STATUS[b.status].label} />
-								{#if daysLate(b) > 0}<StatusBadge
-										tone="warning"
-										label="{daysLate(b)} {daysLate(b) === 1 ? 'day' : 'days'} late"
-									/>{/if}
 								{#if b.ddpPending && b.status !== 'landed'}<StatusBadge
 										tone="warning"
 										label="Transport pending"
