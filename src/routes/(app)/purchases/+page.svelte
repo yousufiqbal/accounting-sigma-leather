@@ -110,7 +110,7 @@
 						<Table.Head>Status</Table.Head>
 						<Table.Head class="text-right">Items</Table.Head>
 						<Table.Head class="text-right">Units</Table.Head>
-						<Table.Head class="text-right">Weight</Table.Head>
+						<Table.Head class="text-right">Box weight</Table.Head>
 						<Table.Head class="pl-8">Expected</Table.Head>
 						<Table.Head class="pr-6 pl-8">Products</Table.Head>
 					</Table.Row>
@@ -193,7 +193,9 @@
 							</Table.Cell>
 							<Table.Cell class="num text-right">{b.totals.units}</Table.Cell>
 							<Table.Cell class="num text-right"
-								>{(b.totals.weightG / 1000).toFixed(1)} kg</Table.Cell
+								>{#if b.billedWeightG}{(b.billedWeightG / 1000).toFixed(1)} kg{:else}<span
+										class="text-muted-foreground">—</span
+									>{/if}</Table.Cell
 							>
 							<Table.Cell class="pl-8 whitespace-nowrap">
 								{@const due = daysToArrival(b)}
