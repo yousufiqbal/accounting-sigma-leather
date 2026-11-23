@@ -167,10 +167,21 @@
 								inputmode="numeric"
 								value={qty[item.id]}
 								onchange={(e) => commitQty(item.id, e)}
+								data-qty
 								onkeydown={(e) => {
+									const input = e.currentTarget as HTMLInputElement;
 									if (e.key === 'Enter') {
 										e.preventDefault();
-										(e.currentTarget as HTMLInputElement).blur();
+										input.blur();
+									} else if (e.key === 'Tab') {
+										const all = [
+											...document.querySelectorAll<HTMLInputElement>('input[data-qty]:not(:disabled)')
+										];
+										const next = all[all.indexOf(input) + (e.shiftKey ? -1 : 1)];
+										if (!next) return;
+										e.preventDefault();
+										next.focus();
+										next.select();
 									}
 								}}
 								title="Restock quantity"

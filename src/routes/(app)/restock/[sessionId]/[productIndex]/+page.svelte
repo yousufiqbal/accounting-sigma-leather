@@ -141,6 +141,23 @@
 	}
 
 	function onkeydown(e: KeyboardEvent) {
+		// Tab goes straight to the next quantity (Shift+Tab: previous), skipping pictures and buttons.
+		if (
+			e.key === 'Tab' &&
+			e.target instanceof HTMLInputElement &&
+			e.target.name.startsWith('qty_')
+		) {
+			const inputs = [
+				...(formEl?.querySelectorAll<HTMLInputElement>('input[name^="qty_"]') ?? [])
+			];
+			const next = inputs[inputs.indexOf(e.target) + (e.shiftKey ? -1 : 1)];
+			if (next) {
+				e.preventDefault();
+				next.focus();
+				next.select();
+			}
+			return;
+		}
 		if (
 			e.key === 'Enter' &&
 			e.target instanceof HTMLInputElement &&

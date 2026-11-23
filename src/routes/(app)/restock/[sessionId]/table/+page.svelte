@@ -136,15 +136,18 @@
 		input.value = next == null ? '' : String(next);
 		if (next !== qty[id]) saveRow(id, next, modes[id]);
 	}
-	/** Enter moves down the column, like a spreadsheet. */
+	/** Enter and Tab move down the column (Shift+Tab up), like a spreadsheet. */
 	function onQtyKeydown(e: KeyboardEvent) {
-		if (e.key !== 'Enter') return;
-		e.preventDefault();
+		if (e.key !== 'Enter' && e.key !== 'Tab') return;
+		const input = e.currentTarget as HTMLInputElement;
 		const inputs = [...document.querySelectorAll<HTMLInputElement>('input[data-qty]')];
-		const i = inputs.indexOf(e.currentTarget as HTMLInputElement);
-		(e.currentTarget as HTMLInputElement).blur();
-		inputs[i + 1]?.focus();
-		inputs[i + 1]?.select();
+		const next = inputs[inputs.indexOf(input) + (e.key === 'Tab' && e.shiftKey ? -1 : 1)];
+		// Past the last (or first) input, Tab leaves the column as usual.
+		if (e.key === 'Tab' && !next) return;
+		e.preventDefault();
+		input.blur();
+		next?.focus();
+		next?.select();
 	}
 	const coverLabel = (d: number | null | undefined) =>
 		d == null ? '—' : d >= 365 ? '1y+' : `${Math.floor(d)}d`;
