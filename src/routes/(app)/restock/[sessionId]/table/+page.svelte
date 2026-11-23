@@ -8,7 +8,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import Thumb from '#lib/components/app/thumb.svelte';
-	import { calcRestock, urgency } from '#lib/restock-calc.js';
+	import { calcRestock } from '#lib/restock-calc.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -31,7 +31,7 @@
 			const calc = s
 				? calcRestock({ s30: i.sales30, s60: i.sales60, s90: i.sales90 }, s, data.lead)
 				: null;
-			return { ...i, stock: s, calc, level: calc ? urgency(calc, data.lead) : null };
+			return { ...i, stock: s, calc };
 		})
 	);
 	type Row = (typeof rows)[number];
@@ -149,14 +149,6 @@
 		next?.focus();
 		next?.select();
 	}
-	const coverLabel = (d: number | null | undefined) =>
-		d == null ? '—' : d >= 365 ? '1y+' : `${Math.floor(d)}d`;
-	const LEVEL: Record<string, string> = {
-		critical: 'bg-danger-soft text-danger',
-		soon: 'bg-warning-soft text-warning',
-		ok: '',
-		idle: 'text-muted-foreground'
-	};
 	let finishing = $state(false);
 </script>
 
@@ -191,6 +183,12 @@
 		<td class="num px-2 py-2 text-center text-muted-foreground">{r.sales90}</td>
 		<td
 			class={[
+				'num px-2 py-2 text-center',
+				r.stock?.incoming ? 'font-semibold' : 'text-muted-foreground'
+			]}>{r.stock?.incoming ?? '—'}</td
+		>
+		<td
+			class={[
 				'num px-2 py-2 text-center font-semibold',
 				r.stock && r.stock.available <= 0 && 'text-danger'
 			]}
@@ -198,19 +196,18 @@
 				? `${r.stock.onHand} on hand · ${r.stock.committed} on unshipped orders`
 				: undefined}>{r.stock?.available ?? '—'}</td
 		>
-		<td
-			class={[
-				'num px-2 py-2 text-center',
-				r.stock?.incoming ? 'font-semibold' : 'text-muted-foreground'
-			]}>{r.stock?.incoming ?? '—'}</td
-		>
-		<td class="px-1 py-2 text-center">
-			<span
-				class={[
-					'num inline-block rounded-md px-1.5 py-0.5 text-xs font-semibold',
-					LEVEL[r.level ?? 'idle']
-				]}>{coverLabel(r.calc?.coverDays)}</span
-			>
+		<td class="px-3 py-2">
+			<input
+				data-qty
+				type="number"
+				min="0"
+				inputmode="numeric"
+				placeholder="—"
+				value={qty[r.id] ?? ''}
+				onchange={(e) => onQtyChange(r.id, e)}
+				onkeydown={onQtyKeydown}
+				class="num h-8 w-16 [appearance:textfield] rounded-md border bg-card text-center font-semibold focus:ring-2 focus:ring-ring/40 focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+			/>
 		</td>
 		<td class="px-1 py-2 text-center">
 			{#if r.calc}
@@ -239,19 +236,6 @@
 					]}>{r.calc.recSea}</button
 				>
 			{/if}
-		</td>
-		<td class="px-3 py-2">
-			<input
-				data-qty
-				type="number"
-				min="0"
-				inputmode="numeric"
-				placeholder="—"
-				value={qty[r.id] ?? ''}
-				onchange={(e) => onQtyChange(r.id, e)}
-				onkeydown={onQtyKeydown}
-				class="num h-8 w-16 [appearance:textfield] rounded-md border bg-card text-center font-semibold focus:ring-2 focus:ring-ring/40 focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-			/>
 		</td>
 	</tr>
 {/snippet}
@@ -327,19 +311,18 @@
 					<th class="px-3 py-2.5 text-left">Item</th>
 					<th class="w-14 px-2 py-2.5" title="Sold in the last 30 days">30d</th>
 					<th class="w-14 px-2 py-2.5" title="Sold in the last 90 days">90d</th>
-					<th class="w-16 px-2 py-2.5" title="On hand minus unshipped orders">Avail</th>
 					<th class="w-20 px-2 py-2.5" title="On purchases not arrived yet">Incoming</th>
-					<th class="w-14 px-2 py-2.5" title="Days until available + incoming runs out">Lasts</th>
+					<th class="w-16 px-2 py-2.5" title="On hand minus unshipped orders">Avail</th>
+					<th class="w-24 px-3 py-2.5">Qty</th>
 					<th class="w-14 px-2 py-2.5">✈ Air</th>
 					<th class="w-14 px-2 py-2.5">🚢 Sea</th>
-					<th class="w-24 px-3 py-2.5">Qty</th>
 				</tr>
 			</thead>
 			{#each groups as g (g.position)}
 				<tbody class="border-t-4 border-muted first-of-type:border-t-0">
 					{#if g.rows[0].variantTitle !== null}
 						<tr class="bg-muted/40">
-							<td colspan="9" class="px-3 py-2">
+							<td colspan="8" class="px-3 py-2">
 								<div class="flex min-w-0 items-center gap-2.5">
 									<Thumb src={g.imageUrl} alt="" size={36} />
 									<div class="min-w-0">
@@ -362,7 +345,7 @@
 			{:else}
 				<tbody
 					><tr
-						><td colspan="9" class="p-8 text-center text-sm text-muted-foreground"
+						><td colspan="8" class="p-8 text-center text-sm text-muted-foreground"
 							>No matching items.</td
 						></tr
 					></tbody

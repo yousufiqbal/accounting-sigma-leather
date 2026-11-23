@@ -20,7 +20,6 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import Thumb from '#lib/components/app/thumb.svelte';
-	import { urgency } from '#lib/restock-calc.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -40,14 +39,6 @@
 		modes = { ...modes, [id]: mode };
 		input.focus();
 	}
-	const coverLabel = (d: number | null) =>
-		d === null ? '—' : d >= 365 ? '1y+' : `${Math.floor(d)}d`;
-	const LEVEL: Record<string, string> = {
-		critical: 'border-danger/30 bg-danger-soft text-danger',
-		soon: 'border-warning/30 bg-warning-soft text-warning',
-		ok: '',
-		idle: 'text-muted-foreground'
-	};
 
 	function markDoneLocal(i: number) {
 		let set = sessionDone.get(data.session.id);
@@ -331,16 +322,15 @@
 						class="hidden grid-cols-[minmax(0,1.4fr)_auto_auto_auto] items-center gap-4 bg-muted/40 px-4 py-2 text-[11px] font-medium tracking-wide text-muted-foreground uppercase lg:grid"
 					>
 						<span>Variant</span>
-						<span class="grid grid-cols-4 gap-2 text-center"
-							><span class="w-14">90d</span><span class="w-14">Avail</span><span class="w-14"
-								>Incoming</span
-							><span class="w-14">Lasts</span></span
+						<span class="grid grid-cols-3 gap-2 text-center"
+							><span class="w-14">90d</span><span class="w-14">Incoming</span><span class="w-14"
+								>Avail</span
+							></span
 						>
 						<span class="w-36">Restock qty</span>
 						<span class="w-[7.5rem] text-center">Suggested</span>
 					</div>
 					{#each data.variants as v (v.id)}
-						{@const level = v.calc ? urgency(v.calc, data.lead) : 'idle'}
 						{@const out = v.stock !== null && v.stock.available <= 0}
 						<div
 							class="grid gap-3 p-4 focus-within:bg-accent/40 hover:bg-accent/30 lg:grid-cols-[minmax(0,1.4fr)_auto_auto_auto] lg:items-center lg:gap-4"
@@ -359,25 +349,13 @@
 								</div>
 							</div>
 							<input type="hidden" name="mode_{v.id}" value={modes[v.id] ?? ''} />
-							<div class="grid grid-cols-4 gap-2 text-center">
+							<div class="grid w-fit grid-cols-3 gap-2 text-center">
 								<div
 									class="w-14 rounded-lg border px-1 py-1.5"
 									title="{v.sales30} in 30 days · {v.sales60} in 60 · {v.sales90} in 90"
 								>
 									<div class="text-[10px] text-muted-foreground uppercase lg:hidden">90d</div>
 									<div class="num text-sm font-semibold">{v.sales90}</div>
-								</div>
-								<div
-									class={[
-										'w-14 rounded-lg border px-1 py-1.5',
-										out && 'border-danger/30 bg-danger-soft text-danger'
-									]}
-									title={v.stock
-										? `${v.stock.onHand} on hand · ${v.stock.committed} on unshipped orders`
-										: undefined}
-								>
-									<div class="text-[10px] text-muted-foreground uppercase lg:hidden">Avail</div>
-									<div class="num text-sm font-semibold">{v.stock?.available ?? '—'}</div>
 								</div>
 								<div
 									class="w-14 rounded-lg border px-1 py-1.5"
@@ -394,13 +372,16 @@
 									</div>
 								</div>
 								<div
-									class={['w-14 rounded-lg border px-1 py-1.5', LEVEL[level]]}
-									title="Days until available + incoming runs out at the current sales rate"
+									class={[
+										'w-14 rounded-lg border px-1 py-1.5',
+										out && 'border-danger/30 bg-danger-soft text-danger'
+									]}
+									title={v.stock
+										? `${v.stock.onHand} on hand · ${v.stock.committed} on unshipped orders`
+										: undefined}
 								>
-									<div class="text-[10px] uppercase opacity-80 lg:hidden">Lasts</div>
-									<div class="num text-sm font-semibold">
-										{coverLabel(v.calc?.coverDays ?? null)}
-									</div>
+									<div class="text-[10px] text-muted-foreground uppercase lg:hidden">Avail</div>
+									<div class="num text-sm font-semibold">{v.stock?.available ?? '—'}</div>
 								</div>
 							</div>
 							<div

@@ -150,15 +150,15 @@
 									{item.variantTitle ?? ''}
 								</div>
 							</div>
+							<div class="num w-14 shrink-0 text-right text-xs leading-tight">
+								<div class="text-muted-foreground">Incoming</div>
+								<b class={!live?.incoming ? 'text-muted-foreground' : ''}>{live?.incoming ?? '—'}</b
+								>
+							</div>
 							<div class="num w-12 shrink-0 text-right text-xs leading-tight">
 								<div class="text-muted-foreground">Avail</div>
 								<b class={live && live.available <= 0 ? 'text-danger' : ''}
 									>{live?.available ?? '—'}</b
-								>
-							</div>
-							<div class="num w-14 shrink-0 text-right text-xs leading-tight">
-								<div class="text-muted-foreground">Incoming</div>
-								<b class={!live?.incoming ? 'text-muted-foreground' : ''}>{live?.incoming ?? '—'}</b
 								>
 							</div>
 							<input
